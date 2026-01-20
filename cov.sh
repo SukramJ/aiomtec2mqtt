@@ -1,0 +1,1 @@
+pytest --cov=aiomtec2mqtt --cov-config=.coveragerc --cov-report html tests/
