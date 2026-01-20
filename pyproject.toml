@@ -24,7 +24,7 @@ classifiers = [
 requires-python = ">=3.13.0"
 dependencies    = [
     "pyyaml>=6.0.2",
-    "PyModbus == 3.11.1",
+    "PyModbus == 3.11.4",
     "paho-mqtt>=2.1.0",
     "python-slugify>=8.0.4",
     "voluptuous>=0.15.2",
