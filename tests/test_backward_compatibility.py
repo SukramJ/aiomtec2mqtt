@@ -197,6 +197,7 @@ class TestHomeAssistantDiscovery:
 
         hass = hass_int.HassIntegration(
             hass_base_topic="homeassistant",
+            mqtt_topic="MTEC",
             register_map=reg_map,  # type: ignore[arg-type]
         )
 
@@ -251,6 +252,7 @@ class TestHomeAssistantDiscovery:
 
         hass = hass_int.HassIntegration(
             hass_base_topic="homeassistant",
+            mqtt_topic="MTEC",
             register_map=reg_map,  # type: ignore[arg-type]
         )
 
@@ -303,6 +305,7 @@ class TestHomeAssistantDiscovery:
 
         hass = hass_int.HassIntegration(
             hass_base_topic="homeassistant",
+            mqtt_topic="MTEC",
             register_map=reg_map,  # type: ignore[arg-type]
         )
 
@@ -341,6 +344,7 @@ class TestHomeAssistantDiscovery:
 
         hass = hass_int.HassIntegration(
             hass_base_topic="homeassistant",
+            mqtt_topic="MTEC",
             register_map=reg_map,  # type: ignore[arg-type]
         )
 

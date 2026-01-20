@@ -48,7 +48,9 @@ class MtecCoordinator:
         self._register_map, register_groups = init_register_map()
         self._hass: Final = (
             hass_int.HassIntegration(
-                hass_base_topic=config[Config.HASS_BASE_TOPIC], register_map=self._register_map
+                hass_base_topic=config[Config.HASS_BASE_TOPIC],
+                mqtt_topic=config[Config.MQTT_TOPIC],
+                register_map=self._register_map,
             )
             if config[Config.HASS_ENABLE]
             else None

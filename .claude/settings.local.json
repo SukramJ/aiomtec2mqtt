@@ -3,7 +3,13 @@
     "allow": [
       "Bash(ruff check:*)",
       "Bash(python3 -m ruff check:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(python -m pytest:*)",
+      "Bash(python -m ruff check:*)",
+      "Bash(python -c:*)",
+      "Bash(git diff:*)",
+      "Bash(python -m pylint:*)",
+      "Bash(pre-commit run:*)"
     ]
   }
 }

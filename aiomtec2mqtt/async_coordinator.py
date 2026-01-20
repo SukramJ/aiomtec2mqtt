@@ -20,7 +20,7 @@ Key Features:
 from __future__ import annotations
 
 import asyncio
-import json
+from datetime import datetime
 import logging
 from typing import Any, Final
 
@@ -29,6 +29,7 @@ from aiomtec2mqtt.async_modbus_client import AsyncModbusClient
 from aiomtec2mqtt.async_mqtt_client import AsyncMqttClient
 from aiomtec2mqtt.config import init_config, init_register_map
 from aiomtec2mqtt.const import (
+    EQUIPMENT,
     REFRESH_DEFAULTS,
     SECONDARY_REGISTER_GROUPS,
     UTF8,
@@ -58,6 +59,7 @@ class AsyncMtecCoordinator:
         self._hass: Final = (
             hass_int.HassIntegration(
                 hass_base_topic=self._config[Config.HASS_BASE_TOPIC],
+                mqtt_topic=self._config[Config.MQTT_TOPIC],
                 register_map=self._register_map,
             )
             if self._config[Config.HASS_ENABLE]
@@ -116,6 +118,8 @@ class AsyncMtecCoordinator:
         self._shutdown_event: Final = asyncio.Event()
         self._secondary_group_index: int = 0
         self._hass_discovery_sent: bool = False
+        self._serial_no: str | None = None
+        self._topic_base: str | None = None
 
         if self._config[Config.DEBUG]:
             logging.getLogger().setLevel(logging.DEBUG)
@@ -145,12 +149,20 @@ class AsyncMtecCoordinator:
                             name="poll_base",
                         )
                         task_group.create_task(
+                            self._poll_config_registers(),
+                            name="poll_config",
+                        )
+                        task_group.create_task(
                             self._poll_secondary_registers(),
                             name="poll_secondary",
                         )
                         task_group.create_task(
                             self._poll_statistics(),
                             name="poll_statistics",
+                        )
+                        task_group.create_task(
+                            self._poll_static_registers(),
+                            name="poll_static",
                         )
                         task_group.create_task(
                             self._health_check_loop(),
@@ -174,26 +186,40 @@ class AsyncMtecCoordinator:
         _LOGGER.info("Shutdown requested")
         self._shutdown_event.set()
 
-    def _format_payload(self, *, data: dict[str, Any]) -> str:
+    def _convert_code(self, *, value: int | str, value_items: dict[int, str]) -> str:
+        """Convert code register value to string."""
+        if isinstance(value, int):
+            return value_items.get(value, "Unknown")
+
+        faults: list[str] = []
+        try:
+            value_no = int(f"0b{str(value).replace(' ', '')}", 2)
+            for no, fault in value_items.items():
+                if (value_no & (1 << no)) > 0:
+                    faults.append(fault)
+        except (ValueError, TypeError):
+            pass
+
+        if not faults:
+            faults.append("OK")
+        return ", ".join(faults)
+
+    def _format_value(self, *, value: Any) -> str:
         """
-        Format data as JSON payload.
+        Format a single value as payload string.
 
         Args:
-            data: Dictionary of register values
+            value: The value to format
 
         Returns:
-            JSON string
+            Formatted string
 
         """
-        # Format floats according to configuration
-        formatted = {}
-        for key, value in data.items():
-            if isinstance(value, float):
-                formatted[key] = f"{value:{self._mqtt_float_format}}"
-            else:
-                formatted[key] = value
-
-        return json.dumps(formatted, ensure_ascii=False)
+        if isinstance(value, float):
+            return f"{value:{self._mqtt_float_format}}"
+        if isinstance(value, bool):
+            return "1" if value else "0"
+        return str(value)
 
     async def _health_check_loop(self) -> None:
         """Periodic health check monitoring."""
@@ -230,6 +256,62 @@ class AsyncMtecCoordinator:
                 _LOGGER.error("Error in health check loop: %s", ex)
                 await asyncio.sleep(60)
 
+    async def _initialize_from_static_data(self) -> bool:
+        """
+        Initialize serial_no and topic_base from STATIC register data.
+
+        Returns:
+            True if initialization succeeded, False otherwise.
+
+        """
+        if self._serial_no is not None:
+            return True  # Already initialized
+
+        _LOGGER.info("Reading STATIC data to initialize serial number")
+
+        try:
+            static_data = await self._modbus_client.read_register_group(
+                group_name=RegisterGroup.STATIC
+            )
+
+            if not static_data:
+                _LOGGER.warning("No STATIC data received")
+                return False
+
+            # Extract serial number from the data
+            # The async_modbus_client returns {Register.NAME: value}
+            serial_no = static_data.get("Inverter serial number")
+            firmware = static_data.get("Firmware version")
+            equipment = static_data.get("Equipment info")
+
+            if not serial_no:
+                _LOGGER.warning("Serial number not found in STATIC data")
+                return False
+
+            self._serial_no = str(serial_no)
+            self._topic_base = f"{self._mqtt_topic}/{self._serial_no}"
+
+            _LOGGER.info(
+                "Initialized: serial_no=%s, topic_base=%s",
+                self._serial_no,
+                self._topic_base,
+            )
+
+            # Initialize HASS if enabled
+            if self._hass and not self._hass.is_initialized:
+                self._hass.initialize(
+                    mqtt=None,
+                    serial_no=self._serial_no,
+                    firmware_version=str(firmware) if firmware else "unknown",
+                    equipment_info=str(equipment) if equipment else "unknown",
+                )
+
+        except Exception as ex:
+            _LOGGER.error("Failed to initialize from STATIC data: %s", ex)
+            return False
+        else:
+            return True
+
     def _on_mqtt_message(self, message: Any) -> None:  # kwonly: disable
         """Handle incoming MQTT messages."""
         # Handle HASS birth message
@@ -242,17 +324,18 @@ class AsyncMtecCoordinator:
         """Poll BASE register group continuously."""
         _LOGGER.info("Starting BASE registers polling (interval: %ds)", self._mqtt_refresh_now)
 
+        # Ensure initialization before polling
+        while not self._shutdown_event.is_set() and not await self._initialize_from_static_data():
+            _LOGGER.warning("Waiting for initialization... retrying in 10s")
+            await asyncio.sleep(10)
+
         while not self._shutdown_event.is_set():
             try:
                 # Read BASE registers
                 data = await self._modbus_client.read_register_group(group_name=RegisterGroup.BASE)
 
                 if data:
-                    # Format and publish
-                    topic = f"{self._mqtt_topic}/{RegisterGroup.BASE}"
-                    payload = self._format_payload(data=data)
-                    await self._mqtt_client.publish(topic=topic, payload=payload)
-
+                    await self._publish_register_data(data=data, group=RegisterGroup.BASE)
                     _LOGGER.debug("Published BASE data: %d values", len(data))
 
                 # Wait for next poll
@@ -265,11 +348,46 @@ class AsyncMtecCoordinator:
                 _LOGGER.error("Error in BASE polling: %s", ex)
                 await asyncio.sleep(self._mqtt_refresh_now)
 
+    async def _poll_config_registers(self) -> None:
+        """Poll CONFIG register group periodically (contains writable entities)."""
+        _LOGGER.info(
+            "Starting CONFIG registers polling (interval: %ds)", self._mqtt_refresh_config
+        )
+
+        # Wait for initialization (poll until topic_base is set)
+        while not self._shutdown_event.is_set() and self._topic_base is None:  # noqa: ASYNC110
+            await asyncio.sleep(1)
+
+        while not self._shutdown_event.is_set():
+            try:
+                # Read CONFIG registers
+                data = await self._modbus_client.read_register_group(
+                    group_name=RegisterGroup.CONFIG
+                )
+
+                if data:
+                    await self._publish_register_data(data=data, group=RegisterGroup.CONFIG)
+                    _LOGGER.debug("Published CONFIG data: %d values", len(data))
+
+                # Wait for next poll
+                await asyncio.sleep(self._mqtt_refresh_config)
+
+            except asyncio.CancelledError:
+                _LOGGER.info("CONFIG polling task cancelled")
+                raise
+            except Exception as ex:
+                _LOGGER.error("Error in CONFIG polling: %s", ex)
+                await asyncio.sleep(self._mqtt_refresh_config)
+
     async def _poll_secondary_registers(self) -> None:
         """Poll secondary register groups (GRID, INVERTER, etc.) in round-robin."""
         _LOGGER.info(
             "Starting secondary registers polling (interval: %ds)", self._mqtt_refresh_now
         )
+
+        # Wait for initialization (poll until topic_base is set)
+        while not self._shutdown_event.is_set() and self._topic_base is None:  # noqa: ASYNC110
+            await asyncio.sleep(1)
 
         while not self._shutdown_event.is_set():
             try:
@@ -283,11 +401,7 @@ class AsyncMtecCoordinator:
                 data = await self._modbus_client.read_register_group(group_name=group)
 
                 if data:  # pylint: disable=consider-using-assignment-expr
-                    # Format and publish
-                    topic = f"{self._mqtt_topic}/{group}"
-                    payload = self._format_payload(data=data)
-                    await self._mqtt_client.publish(topic=topic, payload=payload)
-
+                    await self._publish_register_data(data=data, group=group)
                     _LOGGER.debug("Published %s data: %d values", group, len(data))
 
                 # Move to next group
@@ -305,9 +419,44 @@ class AsyncMtecCoordinator:
                 _LOGGER.error("Error in secondary polling: %s", ex)
                 await asyncio.sleep(self._mqtt_refresh_now)
 
+    async def _poll_static_registers(self) -> None:
+        """Poll STATIC register group periodically."""
+        _LOGGER.info(
+            "Starting STATIC registers polling (interval: %ds)", self._mqtt_refresh_static
+        )
+
+        # Wait for initialization (poll until topic_base is set)
+        while not self._shutdown_event.is_set() and self._topic_base is None:  # noqa: ASYNC110
+            await asyncio.sleep(1)
+
+        while not self._shutdown_event.is_set():
+            try:
+                # Read STATIC registers
+                data = await self._modbus_client.read_register_group(
+                    group_name=RegisterGroup.STATIC
+                )
+
+                if data:
+                    await self._publish_register_data(data=data, group=RegisterGroup.STATIC)
+                    _LOGGER.debug("Published STATIC data: %d values", len(data))
+
+                # Wait for next poll
+                await asyncio.sleep(self._mqtt_refresh_static)
+
+            except asyncio.CancelledError:
+                _LOGGER.info("STATIC polling task cancelled")
+                raise
+            except Exception as ex:
+                _LOGGER.error("Error in STATIC polling: %s", ex)
+                await asyncio.sleep(self._mqtt_refresh_static)
+
     async def _poll_statistics(self) -> None:
         """Poll DAY and TOTAL statistics periodically."""
         _LOGGER.info("Starting statistics polling (interval: %ds)", self._mqtt_refresh_day)
+
+        # Wait for initialization (poll until topic_base is set)
+        while not self._shutdown_event.is_set() and self._topic_base is None:  # noqa: ASYNC110
+            await asyncio.sleep(1)
 
         while not self._shutdown_event.is_set():
             try:
@@ -316,9 +465,7 @@ class AsyncMtecCoordinator:
                     group_name=RegisterGroup.DAY
                 )
                 if day_data:
-                    topic = f"{self._mqtt_topic}/{RegisterGroup.DAY}"
-                    payload = self._format_payload(data=day_data)
-                    await self._mqtt_client.publish(topic=topic, payload=payload)
+                    await self._publish_register_data(data=day_data, group=RegisterGroup.DAY)
                     _LOGGER.debug("Published DAY statistics")
 
                 # Read TOTAL statistics
@@ -326,9 +473,7 @@ class AsyncMtecCoordinator:
                     group_name=RegisterGroup.TOTAL
                 )
                 if total_data:
-                    topic = f"{self._mqtt_topic}/{RegisterGroup.TOTAL}"
-                    payload = self._format_payload(data=total_data)
-                    await self._mqtt_client.publish(topic=topic, payload=payload)
+                    await self._publish_register_data(data=total_data, group=RegisterGroup.TOTAL)
                     _LOGGER.debug("Published TOTAL statistics")
 
                 # Wait for next poll
@@ -341,40 +486,220 @@ class AsyncMtecCoordinator:
                 _LOGGER.error("Error in statistics polling: %s", ex)
                 await asyncio.sleep(self._mqtt_refresh_day)
 
+    def _process_register_value(
+        self, *, register_addr: str, value: Any, reg_info: dict[str, Any]
+    ) -> Any:
+        """
+        Process a register value (special formatting, enum conversion).
+
+        Args:
+            register_addr: The register address as string
+            value: The raw value
+            reg_info: Register information
+
+        Returns:
+            Processed value
+
+        """
+        # Firmware version formatting (register 10011)
+        if register_addr == "10011" and isinstance(value, str) and "  " in value:
+            try:
+                fw0, fw1 = str(value).split("  ")
+                return f"V{fw0.replace(' ', '.')}-V{fw1.replace(' ', '.')}"
+            except (ValueError, AttributeError):
+                pass
+
+        # Equipment info lookup (register 10008)
+        if register_addr == "10008" and isinstance(value, str) and " " in value:
+            try:
+                upper, lower = value.split(" ")
+                return EQUIPMENT.get(int(upper), {}).get(int(lower), "unknown")
+            except (ValueError, AttributeError):
+                pass
+
+        # Enum conversion for device_class == "enum"
+        if reg_info.get(Register.DEVICE_CLASS) == "enum" and (
+            value_items := reg_info.get(Register.VALUE_ITEMS)
+        ):
+            return self._convert_code(value=value, value_items=value_items)
+
+        return value
+
+    async def _publish_pseudo_registers(
+        self,
+        *,
+        processed_data: dict[str, Any],
+        raw_data: dict[str, Any],
+        group: RegisterGroup,
+    ) -> None:
+        """
+        Calculate and publish pseudo-registers.
+
+        Args:
+            processed_data: Processed data with mqtt_keys
+            raw_data: Raw data with Register.NAME keys
+            group: The register group
+
+        """
+        if not self._topic_base:
+            return
+
+        base = f"{self._topic_base}/{group}"
+        pseudo_values: dict[str, Any] = {}
+
+        # Map Register.NAME to value for calculations
+        name_to_value: dict[str, float] = {}
+        for name, value in raw_data.items():
+            if isinstance(value, (int, float)):
+                name_to_value[name] = float(value)
+
+        if group == RegisterGroup.BASE:
+            # consumption = Inverter AC power (11016) - Grid power (11000)
+            inverter_ac = name_to_value.get("Inverter AC power", 0)
+            grid_power = name_to_value.get("Grid power", 0)
+            pseudo_values["consumption"] = max(0.0, inverter_ac - grid_power)
+
+            # api_date = current timestamp (mqtt key from registers.yaml)
+            pseudo_values["api_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        elif group == RegisterGroup.DAY:
+            # consumption_day = PV + Grid purchase + Battery discharge - Grid injection - Battery charge
+            # Register names from registers.yaml
+            pv_gen = name_to_value.get("PV energy generated (day)", 0)
+            grid_purchase = name_to_value.get("Grid purchased energy (day)", 0)
+            batt_discharge = name_to_value.get("Battery discharge energy (day)", 0)
+            grid_injection = name_to_value.get("Grid injection energy (day)", 0)
+            batt_charge = name_to_value.get("Battery charge energy (day)", 0)
+
+            consumption_day = (
+                pv_gen + grid_purchase + batt_discharge - grid_injection - batt_charge
+            )
+            pseudo_values["consumption_day"] = max(0.0, consumption_day)
+
+            # autarky_rate_day = 100 * (1 - grid_purchase / consumption_day)
+            if consumption_day > 0:
+                pseudo_values["autarky_rate_day"] = 100 * (1 - grid_purchase / consumption_day)
+            else:
+                pseudo_values["autarky_rate_day"] = 0
+
+            # own_consumption_day = 100 * (1 - grid_injection / pv_gen)
+            if pv_gen > 0:
+                pseudo_values["own_consumption_day"] = 100 * (1 - grid_injection / pv_gen)
+            else:
+                pseudo_values["own_consumption_day"] = 0
+
+        elif group == RegisterGroup.TOTAL:
+            # consumption_total
+            pv_gen = name_to_value.get("PV energy generated (total)", 0)
+            grid_purchase = name_to_value.get("Grid energy purchased (total)", 0)
+            batt_discharge = name_to_value.get("Battery energy discharged (total)", 0)
+            grid_injection = name_to_value.get("Grid energy injected (total)", 0)
+            batt_charge = name_to_value.get("Battery energy charged (total)", 0)
+
+            consumption_total = (
+                pv_gen + grid_purchase + batt_discharge - grid_injection - batt_charge
+            )
+            pseudo_values["consumption_total"] = max(0.0, consumption_total)
+
+            # autarky_rate_total
+            if consumption_total > 0:
+                pseudo_values["autarky_rate_total"] = 100 * (1 - grid_purchase / consumption_total)
+            else:
+                pseudo_values["autarky_rate_total"] = 0
+
+            # own_consumption_total
+            if pv_gen > 0:
+                pseudo_values["own_consumption_total"] = 100 * (1 - grid_injection / pv_gen)
+            else:
+                pseudo_values["own_consumption_total"] = 0
+
+        # Publish pseudo-registers
+        for mqtt_key, value in pseudo_values.items():
+            # Correct negative values
+            if isinstance(value, float) and value < 0:
+                value = 0.0
+
+            topic = f"{base}/{mqtt_key}/state"
+            payload = self._format_value(value=value)
+            await self._mqtt_client.publish(topic=topic, payload=payload)
+
+    async def _publish_register_data(self, *, data: dict[str, Any], group: RegisterGroup) -> None:
+        """
+        Publish register data to MQTT in the correct format.
+
+        Publishes each value to: {topic_base}/{group}/{mqtt_key}/state
+
+        Args:
+            data: Dictionary of {Register.NAME: value} from modbus client
+            group: The register group
+
+        """
+        if not self._topic_base:
+            _LOGGER.warning("Cannot publish: topic_base not initialized")
+            return
+
+        # Build reverse lookups
+        name_to_mqtt: dict[str, str] = {}
+        name_to_addr: dict[str, str] = {}
+        name_to_info: dict[str, dict[str, Any]] = {}
+        for reg_addr, reg_info in self._register_map.items():
+            name = reg_info.get(Register.NAME)
+            mqtt_key = reg_info.get(Register.MQTT)
+            if name:
+                if mqtt_key:
+                    name_to_mqtt[name] = mqtt_key
+                name_to_addr[name] = reg_addr
+                name_to_info[name] = reg_info
+
+        base = f"{self._topic_base}/{group}"
+        processed_data: dict[str, Any] = {}
+
+        for name, value in data.items():
+            if not (mqtt_key := name_to_mqtt.get(name)):
+                _LOGGER.debug("No mqtt_key for register name: %s", name)
+                continue
+
+            reg_addr = name_to_addr.get(name, "")
+            reg_info = name_to_info.get(name, {})
+
+            # Process the value (special formatting, enum conversion)
+            processed_value = self._process_register_value(
+                register_addr=reg_addr, value=value, reg_info=reg_info
+            )
+
+            # Note: Negative value correction only for pseudo-registers (matching sync behavior)
+            # Regular registers CAN have negative values (e.g., grid_power when exporting)
+
+            processed_data[mqtt_key] = processed_value
+
+            topic = f"{base}/{mqtt_key}/state"
+            payload = self._format_value(value=processed_value)
+            await self._mqtt_client.publish(topic=topic, payload=payload)
+
+        # Calculate and publish pseudo-registers for specific groups
+        await self._publish_pseudo_registers(
+            processed_data=processed_data, raw_data=data, group=group
+        )
+
     async def _send_hass_discovery(self) -> None:
         """Send Home Assistant discovery messages."""
         if not self._hass:
             return
 
+        # Ensure we're initialized first
+        if not await self._initialize_from_static_data():
+            _LOGGER.error("Cannot send HASS discovery: not initialized")
+            return
+
         _LOGGER.info("Sending Home Assistant discovery messages")
 
         try:
-            # Get device info from first Modbus read
-            static_data = await self._modbus_client.read_register_group(
-                group_name=RegisterGroup.STATIC
-            )
+            # Publish discovery messages from _devices_array
+            for topic, payload_str, _command_topic in self._hass._devices_array:  # noqa: SLF001 # pylint: disable=protected-access
+                await self._mqtt_client.publish(topic=topic, payload=payload_str, retain=True)
 
-            if static_data:
-                # Extract serial number, firmware, and equipment info
-                serial_no = static_data.get("serial_no", "unknown")
-                firmware = static_data.get("firmware_version", "unknown")
-                equipment = static_data.get("equipment_info", "unknown")
-
-                # Initialize HASS integration (generates _devices_array)
-                # Pass None for mqtt since we'll publish discovery messages ourselves
-                self._hass.initialize(
-                    mqtt=None,
-                    serial_no=serial_no,
-                    firmware_version=firmware,
-                    equipment_info=equipment,
-                )
-
-                # Publish discovery messages from _devices_array
-                for topic, payload_str, _command_topic in self._hass._devices_array:  # noqa: SLF001 # pylint: disable=protected-access
-                    await self._mqtt_client.publish(topic=topic, payload=payload_str, retain=True)
-
-                _LOGGER.info("Sent %d discovery messages", len(self._hass._devices_array))  # pylint: disable=protected-access
-                self._hass_discovery_sent = True
+            _LOGGER.info("Sent %d discovery messages", len(self._hass._devices_array))  # pylint: disable=protected-access
+            self._hass_discovery_sent = True
 
         except Exception as ex:
             _LOGGER.error("Failed to send HASS discovery: %s", ex)

@@ -62,7 +62,9 @@ class TestHassIntegration:
             },
         }
 
-        hass = HassIntegration(hass_base_topic="homeassistant", register_map=reg_map)  # type: ignore[arg-type]
+        hass = HassIntegration(
+            hass_base_topic="homeassistant", mqtt_topic="MTEC", register_map=reg_map
+        )  # type: ignore[arg-type]
         mqtt = DummyMqtt()
         hass.initialize(mqtt=mqtt, serial_no="SN", firmware_version="V1", equipment_info="EQ")
 

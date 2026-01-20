@@ -5,6 +5,56 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.3] - 2026-01-20
+
+### Fixed
+
+- **Missing CONFIG and STATIC Polling**: Added missing register group polling in async coordinator
+
+  - Added `_poll_config_registers()` task for CONFIG group (writable entities)
+  - Added `_poll_static_registers()` task for STATIC group
+  - Now all register groups are polled matching sync behavior:
+    - BASE: every `refresh_now` seconds
+    - CONFIG: every `refresh_config` seconds (writable entities)
+    - SECONDARY (GRID, INVERTER, BACKUP, BATTERY, PV): round-robin every `refresh_now` seconds
+    - DAY/TOTAL: every `refresh_day` seconds
+    - STATIC: every `refresh_static` seconds
+
+- **Async/Sync Output Compatibility**: Complete alignment of async implementation with sync output
+  - Fixed MQTT keys for all pseudo-registers to match `registers.yaml` definitions:
+    - `api-date` → `api_date`
+    - `consumption-day` → `consumption_day`
+    - `autarky-day` → `autarky_rate_day`
+    - `ownconsumption-day` → `own_consumption_day`
+    - `consumption-total` → `consumption_total`
+    - `autarky-total` → `autarky_rate_total`
+    - `ownconsumption-total` → `own_consumption_total`
+  - Fixed BYTE length==4 spacing format: `XX XX XX XX XX XX XX XX` (single spaces within halves, double space in middle)
+  - Fixed negative value correction to only apply to pseudo-registers (matching sync behavior)
+  - Added I16/I32 type aliases for S16/S32 register decoding
+  - Implemented firmware version formatting (register 10011)
+  - Implemented equipment info lookup (register 10008)
+  - Implemented enum conversion for device_class=="enum" registers
+  - Fixed STR type decoding with proper length handling for multi-register strings (e.g., serial number)
+  - Fixed register clustering to consider register length for optimal Modbus traffic
+
+### Added
+
+- **Parity Test Suite** (`test_sync_async_parity.py`): 31 new tests to prevent sync/async divergence
+  - Register decoding tests (U16, S16, U32, S32, BYTE, BIT, DAT, STR)
+  - Special register processing tests (firmware, equipment, enums)
+  - Pseudo-register calculation tests
+  - MQTT topic structure and formatting tests
+  - Polling group coverage tests
+
+### Technical Details
+
+- Async coordinator now produces 100% identical MQTT output to sync coordinator
+- All 274 tests passing (243 existing + 31 new parity tests)
+- Home Assistant discovery and entity updates now work correctly with async client
+
+---
+
 ## [1.0.2] - 2026-01-20
 
 ### Changed
@@ -303,6 +353,7 @@ See `ARCHITECTURE.md` for complete migration guide and roadmap.
 - Systemd service installation script
 - Documentation and examples
 
+[1.0.3]: https://github.com/sukramj/aiomtec2mqtt/compare/v1.0.2..v1.0.3
 [1.0.2]: https://github.com/sukramj/aiomtec2mqtt/compare/v1.0.1..v1.0.2
 [1.0.1]: https://github.com/sukramj/aiomtec2mqtt/compare/v1.0.0..v1.0.1
 [1.0.0]: https://github.com/sukramj/aiomtec2mqtt/compare/c0dc8a6..v1.0.0
