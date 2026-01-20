@@ -9,7 +9,9 @@
       "Bash(python -c:*)",
       "Bash(git diff:*)",
       "Bash(python -m pylint:*)",
-      "Bash(pre-commit run:*)"
+      "Bash(pre-commit run:*)",
+      "Bash(prek:*)",
+      "Bash(git add:*)"
     ]
   }
 }

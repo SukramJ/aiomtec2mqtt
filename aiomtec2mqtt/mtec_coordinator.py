@@ -190,7 +190,7 @@ class MtecCoordinator:
 
                         # Avoid to report negative values, which might occur in some edge cases
                         val = pvdata[mqtt_key]
-                        if isinstance(val, float) and val < 0:
+                        if isinstance(val, (int, float)) and val < 0:
                             pvdata[mqtt_key] = 0
 
         except Exception as ex:

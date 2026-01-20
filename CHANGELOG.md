@@ -41,16 +41,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **Parity Test Suite** (`test_sync_async_parity.py`): 31 new tests to prevent sync/async divergence
+
   - Register decoding tests (U16, S16, U32, S32, BYTE, BIT, DAT, STR)
   - Special register processing tests (firmware, equipment, enums)
   - Pseudo-register calculation tests
   - MQTT topic structure and formatting tests
   - Polling group coverage tests
 
+- **Comprehensive Comparison Test Suite** (`test_sync_async_output_comparison.py`): 76 new tests
+
+  - Byte-by-byte comparison of sync vs async decoding for all register types
+  - Edge case testing (negative values, zero values, maximum values)
+  - Special register processing verification (firmware, equipment, enums)
+  - Pseudo-register calculation comparison with negative value correction
+  - MQTT output formatting verification
+
+- **Negative Value Bug Fix** (sync coordinator): Fixed bug where negative integer pseudo-register values were not corrected to 0
+  - Changed `isinstance(val, float)` to `isinstance(val, (int, float))` in `mtec_coordinator.py`
+  - Ensures both int and float negative values are corrected to 0 for pseudo-registers
+
 ### Technical Details
 
 - Async coordinator now produces 100% identical MQTT output to sync coordinator
-- All 274 tests passing (243 existing + 31 new parity tests)
+- All 350 tests passing (243 existing + 31 parity + 76 comparison tests)
 - Home Assistant discovery and entity updates now work correctly with async client
 
 ---
