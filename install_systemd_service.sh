@@ -12,7 +12,7 @@ After=multi-user.target
 Type=simple
 User=USER
 WorkingDirectory=BASE_DIR
-ExecStart=BASE_DIR/python3 aiomtec2mqtt
+ExecStart=BASE_DIR/venv/bin/aiomtec2mqtt
 Restart=always
 
 [Install]
