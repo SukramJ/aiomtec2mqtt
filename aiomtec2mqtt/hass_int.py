@@ -17,7 +17,7 @@ import logging
 from typing import Any, Final
 
 from aiomtec2mqtt import mqtt_client
-from aiomtec2mqtt.const import HA, MTEC_PREFIX, MTEC_TOPIC_ROOT, HAPlatform, Register
+from aiomtec2mqtt.const import HA, MTEC_PREFIX, HAPlatform, Register
 
 _LOGGER: Final = logging.getLogger(__name__)
 
@@ -31,9 +31,12 @@ class HassIntegration:
         # ("Set general mode", "MTEC_load_battery_btn", "load_battery_from_grid"),
     ]
 
-    def __init__(self, *, hass_base_topic: str, register_map: dict[str, dict[str, Any]]) -> None:
+    def __init__(
+        self, *, hass_base_topic: str, mqtt_topic: str, register_map: dict[str, dict[str, Any]]
+    ) -> None:
         """Init hass integration."""
         self._hass_base_topic: Final = hass_base_topic
+        self._mqtt_topic: Final = mqtt_topic
         self._register_map: Final = register_map
         self._mqtt: mqtt_client.MqttClient | None = None
         self._serial_no: str | None = None
@@ -113,7 +116,7 @@ class HassIntegration:
         group = item[Register.GROUP]
         mqtt = item[Register.MQTT]
         unique_id = f"{MTEC_PREFIX}{mqtt}"
-        state_topic = f"{MTEC_TOPIC_ROOT}/{self._serial_no}/{group}/{mqtt}/state"
+        state_topic = f"{self._mqtt_topic}/{self._serial_no}/{group}/{mqtt}/state"
 
         data_item = {
             HA.DEVICE: self._device_info,
@@ -139,7 +142,7 @@ class HassIntegration:
         name = item[Register.NAME]
         unit = item[Register.UNIT]
         unique_id = f"{MTEC_PREFIX}{mqtt}"
-        mtec_topic = f"{MTEC_TOPIC_ROOT}/{self._serial_no}/{group}/{mqtt}"
+        mtec_topic = f"{self._mqtt_topic}/{self._serial_no}/{group}/{mqtt}"
         command_topic = f"{mtec_topic}/set"
         state_topic = f"{mtec_topic}/state"
         data_item = {
@@ -165,7 +168,7 @@ class HassIntegration:
         mqtt = item[Register.MQTT]
         name = item[Register.NAME]
         unique_id = f"{MTEC_PREFIX}{mqtt}"
-        mtec_topic = f"{MTEC_TOPIC_ROOT}/{self._serial_no}/{group}/{mqtt}"
+        mtec_topic = f"{self._mqtt_topic}/{self._serial_no}/{group}/{mqtt}"
         command_topic = f"{mtec_topic}/set"
         state_topic = f"{mtec_topic}/state"
         data_item = {
@@ -187,7 +190,7 @@ class HassIntegration:
         mqtt = item[Register.MQTT]
         unit = item.get(Register.UNIT, "")
         unique_id = f"{MTEC_PREFIX}{mqtt}"
-        state_topic = f"{MTEC_TOPIC_ROOT}/{self._serial_no}/{group}/{mqtt}/state"
+        state_topic = f"{self._mqtt_topic}/{self._serial_no}/{group}/{mqtt}/state"
 
         data_item = {
             HA.DEVICE: self._device_info,
@@ -212,7 +215,7 @@ class HassIntegration:
         mqtt = item[Register.MQTT]
         name = item[Register.NAME]
         unique_id = f"{MTEC_PREFIX}{mqtt}"
-        mtec_topic = f"{MTEC_TOPIC_ROOT}/{self._serial_no}/{group}/{mqtt}"
+        mtec_topic = f"{self._mqtt_topic}/{self._serial_no}/{group}/{mqtt}"
         command_topic = f"{mtec_topic}/set"
         state_topic = f"{mtec_topic}/state"
         data_item = {
@@ -237,7 +240,7 @@ class HassIntegration:
     def _build_automation_array(self) -> None:
         # Buttons
         for name, unique_id, payload_press in self.buttons:
-            command_topic = f"{MTEC_TOPIC_ROOT}/{self._serial_no}/automations/command"
+            command_topic = f"{self._mqtt_topic}/{self._serial_no}/automations/command"
             data_item = {
                 HA.COMMAND_TOPIC: command_topic,
                 HA.DEVICE: self._device_info,

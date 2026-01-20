@@ -380,7 +380,7 @@ class AsyncModbusClient:
         reg_info: dict[str, Any],
     ) -> Any:
         """
-        Decode register value.
+        Decode register value based on type and length.
 
         Args:
             response: Modbus response
@@ -391,12 +391,98 @@ class AsyncModbusClient:
             Decoded value
 
         """
-        # Get raw value
-        raw_value = response.registers[offset]
+        item_type = str(reg_info.get(Register.TYPE, "U16"))
+        item_length = int(reg_info.get(Register.LENGTH, 1))
 
-        # Apply scale
-        scale = reg_info.get(Register.SCALE, 1)
-        return raw_value / scale if scale > 1 else raw_value
+        # Bounds check
+        if offset < 0 or item_length <= 0 or offset + item_length > len(response.registers):
+            _LOGGER.error(
+                "Decoding bounds error (type=%s, offset=%s, length=%s, available=%s)",
+                item_type,
+                offset,
+                item_length,
+                len(response.registers),
+            )
+            return None
+
+        val: Any = None
+
+        if item_type == "U16":
+            val = int(response.registers[offset])
+        elif item_type in ("S16", "I16"):
+            raw = int(response.registers[offset])
+            val = raw - 65536 if raw > 32767 else raw
+        elif item_type == "U32":
+            reg = response.registers[offset : offset + 2]
+            val = (int(reg[0]) << 16) + int(reg[1])
+        elif item_type in ("S32", "I32"):
+            reg = response.registers[offset : offset + 2]
+            raw = (int(reg[0]) << 16) + int(reg[1])
+            val = raw - 4294967296 if raw > 2147483647 else raw
+        elif item_type == "BYTE":
+            if item_length == 1:
+                reg1 = int(response.registers[offset])
+                val = f"{reg1 >> 8:02d} {reg1 & 0xFF:02d}"
+            elif item_length == 2:
+                reg1 = int(response.registers[offset])
+                reg2 = int(response.registers[offset + 1])
+                val = f"{reg1 >> 8:02d} {reg1 & 0xFF:02d}  {reg2 >> 8:02d} {reg2 & 0xFF:02d}"
+            elif item_length == 4:
+                reg1 = int(response.registers[offset])
+                reg2 = int(response.registers[offset + 1])
+                reg3 = int(response.registers[offset + 2])
+                reg4 = int(response.registers[offset + 3])
+                val = (
+                    f"{reg1 >> 8:02d} {reg1 & 0xFF:02d} {reg2 >> 8:02d} {reg2 & 0xFF:02d}  "
+                    f"{reg3 >> 8:02d} {reg3 & 0xFF:02d} {reg4 >> 8:02d} {reg4 & 0xFF:02d}"
+                )
+            else:
+                _LOGGER.error("Unsupported BYTE length: %s", item_length)
+                return None
+        elif item_type == "BIT":
+            if item_length == 1:
+                reg1 = int(response.registers[offset])
+                val = f"{reg1:016b}"
+            elif item_length == 2:
+                reg1 = int(response.registers[offset])
+                reg2 = int(response.registers[offset + 1])
+                val = f"{reg1:016b} {reg2:016b}"
+            else:
+                bits = [f"{int(response.registers[offset + i]):016b}" for i in range(item_length)]
+                val = " ".join(bits)
+        elif item_type == "DAT":
+            if offset + 3 > len(response.registers):
+                _LOGGER.error("DAT requires 3 registers but not enough data available")
+                return None
+            reg1 = int(response.registers[offset])
+            reg2 = int(response.registers[offset + 1])
+            reg3 = int(response.registers[offset + 2])
+            val = (
+                f"{reg1 >> 8:02d}-{reg1 & 0xFF:02d}-{reg2 >> 8:02d} "
+                f"{reg2 & 0xFF:02d}:{reg3 >> 8:02d}:{reg3 & 0xFF:02d}"
+            )
+        elif item_type == "STR":
+            # item_length defines number of 16-bit registers to read
+            reg = response.registers[offset : offset + item_length]
+            # Convert registers to bytes (each register = 2 bytes, big-endian)
+            raw_bytes = b"".join(r.to_bytes(2, byteorder="big") for r in reg)
+            # Decode as UTF-8 string
+            try:
+                sval = raw_bytes.decode("utf-8")
+            except UnicodeDecodeError:
+                sval = raw_bytes.decode("latin-1")
+            # Strip trailing null bytes and spaces (same as sync client)
+            val = sval.rstrip(" ").rstrip("\x00").rstrip(" ")
+        else:
+            _LOGGER.error("Unknown type %s to decode", item_type)
+            return None
+
+        # Apply scaling to numeric values
+        item_scale = int(reg_info.get(Register.SCALE, 1))
+        if item_scale > 1 and isinstance(val, (int, float)):
+            val = val / item_scale
+
+        return val
 
     def _generate_register_clusters(
         self,
@@ -404,7 +490,7 @@ class AsyncModbusClient:
         registers: list[str],
     ) -> list[dict[str, Any]]:
         """
-        Generate register clusters.
+        Generate register clusters considering register lengths.
 
         Args:
             registers: List of register names
@@ -413,36 +499,46 @@ class AsyncModbusClient:
             List of cluster definitions
 
         """
-        # Sort registers numerically
-        sorted_regs = sorted(
-            [int(r) for r in registers if r.isnumeric() and r in self._register_map]
-        )
+        # Sort registers numerically and get their lengths
+        reg_infos: list[tuple[int, int]] = []  # (address, length)
+        for r in registers:
+            if r.isnumeric() and r in self._register_map:
+                reg_info = self._register_map[r]
+                addr = int(r)
+                length = int(reg_info.get(Register.LENGTH, 1))
+                reg_infos.append((addr, length))
 
-        if not sorted_regs:
+        if not reg_infos:
             return []
 
+        # Sort by address
+        reg_infos.sort(key=lambda x: x[0])
+
         clusters: list[dict[str, Any]] = []
+        first_addr, first_length = reg_infos[0]
         current_cluster: dict[str, Any] = {
-            "start": sorted_regs[0],
-            "count": 1,
-            "registers": [str(sorted_regs[0])],
+            "start": first_addr,
+            "count": first_length,
+            "registers": [str(first_addr)],
         }
 
         # Build clusters (gap <= 10 registers)
-        for reg in sorted_regs[1:]:
-            gap = reg - (current_cluster["start"] + current_cluster["count"])
+        for addr, length in reg_infos[1:]:
+            cluster_end = current_cluster["start"] + current_cluster["count"]
+            gap = addr - cluster_end
 
             if gap <= 10:  # noqa: PLR2004 # pylint: disable=consider-using-assignment-expr
-                # Extend current cluster
-                current_cluster["count"] = reg - current_cluster["start"] + 1
-                current_cluster["registers"].append(str(reg))
+                # Extend current cluster to include this register and its length
+                new_end = addr + length
+                current_cluster["count"] = new_end - current_cluster["start"]
+                current_cluster["registers"].append(str(addr))
             else:
                 # Start new cluster
                 clusters.append(current_cluster)
                 current_cluster = {
-                    "start": reg,
-                    "count": 1,
-                    "registers": [str(reg)],
+                    "start": addr,
+                    "count": length,
+                    "registers": [str(addr)],
                 }
 
         # Add final cluster
