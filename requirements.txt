@@ -1,5 +1,8 @@
-PyModbus == 3.11.4
-pyyaml==6.0.3
-paho-mqtt==2.1.0
+PyModbus>=3.11.4
+pyyaml>=6.0.3
+paho-mqtt>=2.1.0
+aiomqtt>=2.5.0
 python-slugify>=8.0.4
 voluptuous>=0.16.0
+pydantic>=2.12.5
+prometheus-client>=0.24.1

@@ -8,8 +8,8 @@ dynamic = ["version"]
 license = {file = "LICENSE"}
 description = "Read data from a M-TEC Energybutler system and write them to a MQTT broker"
 authors = [
-    {name = "Christian Rödel", email = "christian@roedel.info"},
     {name = "SukramJ", email = "sukramj@icloud.com"},
+    {name = "Christian Rödel", email = "christian@roedel.info"},
 ]
 keywords    = ["home", "automation", "mtec", "mqtt", "modbus"]
 classifiers = [
@@ -24,17 +24,19 @@ classifiers = [
 requires-python = ">=3.13.0"
 dependencies    = [
     "pyyaml>=6.0.2",
-    "PyModbus == 3.11.1",
+    "PyModbus>=3.11.4",
     "paho-mqtt>=2.1.0",
+    "aiomqtt>=2.5.0",
     "python-slugify>=8.0.4",
     "voluptuous>=0.15.2",
+    "pydantic>=2.12.0",
 ]
 
 [project.urls]
 "Source Code" = "https://github.com/sukramj/aiomtec2mqtt"
-"Bug Reports" = "https://github.com/sukramj/aioaiomtec2mqtt/issues"
+"Bug Reports" = "https://github.com/sukramj/aiomtec2mqtt/issues"
 "Docs: Dev"   = "https://github.com/sukramj/aiomtec2mqtt"
-"Forum"       = "https://github.com/sukramj/aioaiomtec2mqtt/discussions"
+"Forum"       = "https://github.com/sukramj/aiomtec2mqtt/discussions"
 
 [project.scripts]
 aiomtec2mqtt = "aiomtec2mqtt.mtec_coordinator:main"

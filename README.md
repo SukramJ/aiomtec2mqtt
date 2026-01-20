@@ -61,14 +61,6 @@ This project enables you to read data from a M-TEC Energybutler (https://www.mte
 
 We hope this project helps you build a powerful and efficient energy management system!
 
-### Changelog
-
-#### V2.0 - 13.03.2024
-
-- Re-packaged supporting a simplified installation
-- Optimized register scanning
-- Removed some over complicated configuration options in config.yaml
-
 ### Disclaimer
 
 This project is a pure hobby project which I created by reverse-engineering different internet sources and my M-TEC Energybutler. It is _not_ related to or supported by M-TEC GmbH by any means.

@@ -2,7 +2,7 @@
 Modbus API for M-TEC Energybutler.
 
 (c) 2023 by Christian Rödel
-(c) 2024 by SukramJ
+(c) 2026 by SukramJ
 """
 
 from __future__ import annotations
@@ -16,6 +16,19 @@ from pymodbus.framer import FramerType
 from pymodbus.pdu.register_message import ReadHoldingRegistersResponse
 
 from aiomtec2mqtt.const import DEFAULT_FRAMER, Config, Register, RegisterGroup
+from aiomtec2mqtt.exceptions import (
+    ModbusConnectionError,
+    ModbusReadError,
+    ModbusTimeoutError,
+    ModbusWriteError,
+)
+from aiomtec2mqtt.health import HealthCheck
+from aiomtec2mqtt.resilience import (
+    CircuitBreaker,
+    CircuitBreakerConfig,
+    ConnectionState,
+    ConnectionStateMachine,
+)
 
 _LOGGER: Final = logging.getLogger(__name__)
 
@@ -25,15 +38,26 @@ class MTECModbusClient:
 
     def __init__(
         self,
+        *,
         config: dict[str, Any],
         register_map: dict[str, dict[str, Any]],
         register_groups: list[str],
+        health_check: HealthCheck | None = None,
     ) -> None:
-        """Init the modbus client."""
+        """
+        Init the modbus client.
+
+        Args:
+            config: Configuration dictionary
+            register_map: Register mapping dictionary
+            register_groups: List of register groups
+            health_check: Optional health check manager for monitoring
+
+        """
         self._error_count = 0
         self._register_map: Final = register_map
         self._register_groups: Final = register_groups
-        self._modbus_client: ModbusTcpClient = None  # type: ignore[assignment]
+        self._modbus_client: ModbusTcpClient | None = None
         # Cache for computed register clusters. Keyed by a normalized tuple of numeric register addresses.
         self._cluster_cache: Final[dict[tuple[int, ...], list[dict[str, Any]]]] = {}
         # Precompute frequently used lookups to reduce per-call overhead
@@ -52,6 +76,23 @@ class MTECModbusClient:
         self._modbus_retries: Final[int] = config[Config.MODBUS_RETRIES]
         self._modbus_slave: Final[int] = config[Config.MODBUS_SLAVE]
         self._modbus_timeout: Final[int] = config[Config.MODBUS_TIMEOUT]
+
+        # Resilience patterns
+        self._circuit_breaker: Final = CircuitBreaker(
+            name="modbus",
+            config=CircuitBreakerConfig(
+                failure_threshold=5,  # Open circuit after 5 failures
+                success_threshold=2,  # Close after 2 successes in HALF_OPEN
+                timeout=30.0,  # Try recovery after 30s
+            ),
+        )
+        self._state_machine: Final = ConnectionStateMachine(name="modbus")
+        self._health_check = health_check
+
+        # Register with health check if provided
+        if self._health_check:
+            self._health_check.register_component(name="modbus")
+
         _LOGGER.debug("Modbus client initialized")
 
     def __del__(self) -> None:
@@ -74,7 +115,22 @@ class MTECModbusClient:
         return self._register_map
 
     def connect(self) -> bool:
-        """Connect to modbus server."""
+        """
+        Connect to modbus server.
+
+        Returns:
+            True if connection successful, False otherwise
+
+        Raises:
+            ModbusConnectionError: If connection fails
+
+        """
+        # Update state machine
+        if self._state_machine.state == ConnectionState.CONNECTED:
+            self._state_machine.transition_to(new_state=ConnectionState.RECONNECTING)
+        else:
+            self._state_machine.transition_to(new_state=ConnectionState.CONNECTING)
+
         self._error_count = 0
         _LOGGER.debug(
             "Connecting to server %s:%i (framer=%s)",
@@ -82,29 +138,51 @@ class MTECModbusClient:
             self._modbus_port,
             self._modbus_framer,
         )
-        self._modbus_client = ModbusTcpClient(
-            host=self._modbus_host,
-            port=self._modbus_port,
-            framer=FramerType(self._modbus_framer),
-            timeout=self._modbus_timeout,
-            retries=self._modbus_retries,
-        )
 
-        if self._modbus_client.connect():  # type: ignore[no-untyped-call]
-            _LOGGER.debug(
-                "Successfully connected to server %s:%i", self._modbus_host, self._modbus_port
+        try:
+            self._modbus_client = ModbusTcpClient(
+                host=self._modbus_host,
+                port=self._modbus_port,
+                framer=FramerType(self._modbus_framer),
+                timeout=self._modbus_timeout,
+                retries=self._modbus_retries,
             )
-            return True
-        _LOGGER.error("Couldn't connect to server %s:%i", self._modbus_host, self._modbus_port)
-        return False
+
+            if self._modbus_client.connect():  # type: ignore[no-untyped-call]
+                _LOGGER.info(
+                    "Successfully connected to server %s:%i", self._modbus_host, self._modbus_port
+                )
+                self._state_machine.transition_to(new_state=ConnectionState.CONNECTED)
+                if self._health_check:
+                    self._health_check.record_success(name="modbus")
+                return True
+            # Connection failed
+            error_msg = f"Couldn't connect to server {self._modbus_host}:{self._modbus_port}"
+            _LOGGER.error(error_msg)
+            self._state_machine.transition_to(new_state=ConnectionState.ERROR, error=error_msg)
+            if self._health_check:
+                self._health_check.record_failure(name="modbus", error=error_msg)
+            return False  # noqa: TRY300
+
+        except Exception as ex:
+            error_msg = f"Connection error to {self._modbus_host}:{self._modbus_port}: {ex}"
+            _LOGGER.exception(error_msg)
+            self._state_machine.transition_to(new_state=ConnectionState.ERROR, error=error_msg)
+            if self._health_check:
+                self._health_check.record_failure(name="modbus", error=error_msg)
+            raise ModbusConnectionError(
+                message=error_msg,
+                details={"host": self._modbus_host, "port": self._modbus_port},
+            ) from ex
 
     def disconnect(self) -> None:
         """Disconnect from Modbus server."""
         if self._modbus_client and self._modbus_client.is_socket_open():
             self._modbus_client.close()  # type: ignore[no-untyped-call]
             _LOGGER.debug("Successfully disconnected from server")
+        self._state_machine.transition_to(new_state=ConnectionState.DISCONNECTED)
 
-    def get_register_list(self, group: RegisterGroup) -> list[str]:
+    def get_register_list(self, *, group: RegisterGroup) -> list[str]:
         """Get a list of all registers which belong to a given group."""
         registers: list[str] = []
         for register, item in self._register_map.items():
@@ -116,7 +194,7 @@ class MTECModbusClient:
             return []
         return registers
 
-    def read_modbus_data(self, registers: list[str] | None = None) -> dict[str, dict[str, Any]]:
+    def read_modbus_data(self, *, registers: list[str] | None = None) -> dict[str, dict[str, Any]]:
         """
         Read modbus data.
 
@@ -155,21 +233,26 @@ class MTECModbusClient:
         _LOGGER.debug("Data retrieval completed")
         return data
 
-    def write_register_by_name(self, name: str, value: Any) -> bool:
-        """Write a value to a register with a given name."""
-        if (register := self._mqtt_name_to_register.get(name)) is None:
-            _LOGGER.error("Can't write unknown register with name: %s", name)
-            return False
-        item = self._register_map[register]
-        if value_items := item.get(Register.VALUE_ITEMS):
-            for value_modbus, value_display in value_items.items():
-                if value_display == value:
-                    value = value_modbus
-                    break
-        return self.write_register(register=register, value=value)
+    def write_register(self, *, register: str, value: Any) -> bool:
+        """
+        Write a value to a register.
 
-    def write_register(self, register: str, value: Any) -> bool:
-        """Write a value to a register."""
+        Args:
+            register: Register address as string
+            value: Value to write
+
+        Returns:
+            True if successful, False otherwise
+
+        Raises:
+            ModbusWriteError: On write errors
+
+        """
+        # Check if connected
+        if self._modbus_client is None:
+            _LOGGER.error("Can't write register - not connected")
+            return False
+
         # Lookup register
         if not (item := self._register_map.get(str(register), None)):
             _LOGGER.error("Can't write unknown register: %s", register)
@@ -191,101 +274,76 @@ class MTECModbusClient:
             value *= item_scale
 
         try:
-            result = self._modbus_client.write_register(
-                address=int(register), value=int(value), device_id=self._modbus_slave
-            )
+            # Use circuit breaker for write operations
+            def _do_write() -> bool:
+                """Perform the write operation."""
+                assert self._modbus_client is not None  # Already checked above
+                result = self._modbus_client.write_register(
+                    address=int(register), value=int(value), device_id=self._modbus_slave
+                )
+                if result.isError():
+                    error_msg = f"Error writing register {register} value {value}"
+                    _LOGGER.error(error_msg)
+                    if self._health_check:
+                        self._health_check.record_failure(name="modbus", error=error_msg)
+                    raise ModbusWriteError(
+                        message=error_msg,
+                        address=int(register),
+                        slave_id=self._modbus_slave,
+                        details={"value": value},
+                    )
+                return True
+
+            # Call through circuit breaker
+            result: bool = cast(bool, self._circuit_breaker.call(_do_write))
         except ModbusException as ex:
-            _LOGGER.error("Exception while writing register %s to pymodbus: %s", register, ex)
-            return False
+            error_msg = f"Modbus exception writing register {register}: {ex}"
+            _LOGGER.error(error_msg)
+            if self._health_check:
+                self._health_check.record_failure(name="modbus", error=error_msg)
+            raise ModbusWriteError(
+                message=error_msg,
+                address=int(register),
+                slave_id=self._modbus_slave,
+                details={"value": value},
+            ) from ex
+        except ModbusWriteError:
+            # Re-raise our typed exception
+            raise
         except Exception as ex:
-            _LOGGER.error("Unexpected error while writing register %s: %s", register, ex)
+            error_msg = f"Unexpected error writing register {register}: {ex}"
+            _LOGGER.exception(error_msg)
+            if self._health_check:
+                self._health_check.record_failure(name="modbus", error=error_msg)
+            raise ModbusWriteError(
+                message=error_msg,
+                address=int(register),
+                slave_id=self._modbus_slave,
+                details={"value": value},
+            ) from ex
+        else:
+            if self._health_check:
+                self._health_check.record_success(name="modbus")
+            return result
+
+    def write_register_by_name(self, *, name: str, value: Any) -> bool:
+        """Write a value to a register with a given name."""
+        if (register := self._mqtt_name_to_register.get(name)) is None:
+            _LOGGER.error("Can't write unknown register with name: %s", name)
             return False
-
-        if result.isError():
-            _LOGGER.error("Error while writing register %s to pymodbus", register)
-            return False
-        return True
-
-    def _get_register_clusters(self, registers: list[str]) -> list[dict[str, Any]]:
-        """Cluster registers in order to optimize modbus traffic."""
-        # Normalize key: use sorted unique numeric registers that exist in the map
-        key_tuple: tuple[int, ...] = tuple(
-            sorted({int(r) for r in registers if r.isnumeric() and r in self._register_map})
-        )
-        if key_tuple not in self._cluster_cache:
-            # Simple cache size guard to avoid unbounded growth in long-running processes
-            if len(self._cluster_cache) > 256:
-                self._cluster_cache.clear()
-            self._cluster_cache[key_tuple] = self._generate_register_clusters(registers=registers)
-        return self._cluster_cache[key_tuple]
-
-    def _generate_register_clusters(self, registers: list[str]) -> list[dict[str, Any]]:
-        """
-        Create clusters.
-
-        Optimizations:
-        - Sort numerically instead of lexicographically to ensure proper clustering.
-        - Ignore non-numeric and unknown registers early to reduce loop work.
-        """
-        cluster: dict[str, Any] = {"start": 0, Register.LENGTH: 0, "items": []}
-        cluster_list: list[dict[str, Any]] = []
-
-        numeric_regs = sorted(
-            {int(r) for r in registers if r.isnumeric() and r in self._register_map}
-        )
-        for reg in numeric_regs:
-            item = self._register_map[str(reg)]
-            # if there is a gap to the current cluster, start a new one
-            if reg > cluster["start"] + cluster[Register.LENGTH]:
-                if cluster["start"] > 0:  # append previous cluster (not the initial dummy)
-                    cluster_list.append(cluster)
-                cluster = {"start": reg, Register.LENGTH: 0, "items": []}
-            # extend current cluster by item length and append the item
-            cluster[Register.LENGTH] += item[Register.LENGTH]
-            cluster["items"].append(item)
-
-        if cluster["start"] > 0:  # append last cluster
-            cluster_list.append(cluster)
-
-        return cluster_list
-
-    def _read_registers(self, register: str, length: int) -> ReadHoldingRegistersResponse | None:
-        """Do the actual reading from modbus."""
-        try:
-            result: ReadHoldingRegistersResponse = cast(
-                ReadHoldingRegistersResponse,
-                self._modbus_client.read_holding_registers(
-                    address=int(register), count=length, device_id=self._modbus_slave
-                ),
-            )
-        except ModbusException as ex:
-            _LOGGER.error(
-                "Exception while reading register %s, length %s from pymodbus: %s",
-                register,
-                length,
-                ex,
-            )
-            return None
-        if result.isError():
-            _LOGGER.error(
-                "Error while reading register %s, length %s from pymodbus", register, length
-            )
-            self._error_count += 1
-            return None
-        if len(result.registers) != length:
-            _LOGGER.error(
-                "Error while reading register %s from pymodbus: Requested length %s, received %i",
-                register,
-                length,
-                len(result.registers),
-            )
-            return None
-        return result
+        item = self._register_map[register]
+        if value_items := item.get(Register.VALUE_ITEMS):
+            for value_modbus, value_display in value_items.items():
+                if value_display == value:
+                    value = value_modbus
+                    break
+        return self.write_register(register=register, value=value)
 
     def _decode_rawdata(
-        self, rawdata: ReadHoldingRegistersResponse, offset: int, item: dict[str, Any]
+        self, *, rawdata: ReadHoldingRegistersResponse, offset: int, item: dict[str, Any]
     ) -> dict[str, Any]:
         """Decode the result from rawdata, starting at offset."""
+        assert self._modbus_client is not None  # Called after successful read
         dt = self._modbus_client.DATATYPE
         try:
             val = None
@@ -399,3 +457,142 @@ class MTECModbusClient:
                 ex,
             )
             return {}
+
+    def _generate_register_clusters(self, *, registers: list[str]) -> list[dict[str, Any]]:
+        """
+        Create clusters.
+
+        Optimizations:
+        - Sort numerically instead of lexicographically to ensure proper clustering.
+        - Ignore non-numeric and unknown registers early to reduce loop work.
+        """
+        cluster: dict[str, Any] = {"start": 0, Register.LENGTH: 0, "items": []}
+        cluster_list: list[dict[str, Any]] = []
+
+        numeric_regs = sorted(
+            {int(r) for r in registers if r.isnumeric() and r in self._register_map}
+        )
+        for reg in numeric_regs:
+            item = self._register_map[str(reg)]
+            # if there is a gap to the current cluster, start a new one
+            if reg > cluster["start"] + cluster[Register.LENGTH]:
+                if cluster["start"] > 0:  # append previous cluster (not the initial dummy)
+                    cluster_list.append(cluster)
+                cluster = {"start": reg, Register.LENGTH: 0, "items": []}
+            # extend current cluster by item length and append the item
+            cluster[Register.LENGTH] += item[Register.LENGTH]
+            cluster["items"].append(item)
+
+        if cluster["start"] > 0:  # append last cluster
+            cluster_list.append(cluster)
+
+        return cluster_list
+
+    def _get_register_clusters(self, *, registers: list[str]) -> list[dict[str, Any]]:
+        """Cluster registers in order to optimize modbus traffic."""
+        # Normalize key: use sorted unique numeric registers that exist in the map
+        key_tuple: tuple[int, ...] = tuple(
+            sorted({int(r) for r in registers if r.isnumeric() and r in self._register_map})
+        )
+        if key_tuple not in self._cluster_cache:
+            # Simple cache size guard to avoid unbounded growth in long-running processes
+            if len(self._cluster_cache) > 256:
+                self._cluster_cache.clear()
+            self._cluster_cache[key_tuple] = self._generate_register_clusters(registers=registers)
+        return self._cluster_cache[key_tuple]
+
+    def _read_registers(
+        self, *, register: str, length: int
+    ) -> ReadHoldingRegistersResponse | None:
+        """
+        Do the actual reading from modbus.
+
+        Args:
+            register: Register address as string
+            length: Number of registers to read
+
+        Returns:
+            ReadHoldingRegistersResponse if successful, None on error
+
+        Raises:
+            ModbusReadError: On read errors
+            ModbusTimeoutError: On timeout
+
+        """
+        try:
+            # Use circuit breaker for read operations
+            def _do_read() -> ReadHoldingRegistersResponse:
+                """Perform the read operation."""
+                assert self._modbus_client is not None  # Set during connect()
+                result = cast(
+                    ReadHoldingRegistersResponse,
+                    self._modbus_client.read_holding_registers(
+                        address=int(register), count=length, device_id=self._modbus_slave
+                    ),
+                )
+                if result.isError():
+                    error_msg = f"Error reading register {register}, length {length}"
+                    _LOGGER.error(error_msg)
+                    self._error_count += 1
+                    if self._health_check:
+                        self._health_check.record_failure(name="modbus", error=error_msg)
+                    raise ModbusReadError(
+                        message=error_msg,
+                        address=int(register),
+                        slave_id=self._modbus_slave,
+                    )
+                if len(result.registers) != length:
+                    error_msg = (
+                        f"Register {register} length mismatch: "
+                        f"requested {length}, received {len(result.registers)}"
+                    )
+                    _LOGGER.error(error_msg)
+                    raise ModbusReadError(
+                        message=error_msg,
+                        address=int(register),
+                        slave_id=self._modbus_slave,
+                        details={"requested": length, "received": len(result.registers)},
+                    )
+                return result
+
+            # Call through circuit breaker
+            result: ReadHoldingRegistersResponse = cast(
+                ReadHoldingRegistersResponse, self._circuit_breaker.call(_do_read)
+            )
+        except ModbusException as ex:
+            error_msg = f"Modbus exception reading register {register}, length {length}: {ex}"
+            _LOGGER.error(error_msg)
+            self._error_count += 1
+            if self._health_check:
+                self._health_check.record_failure(name="modbus", error=error_msg)
+
+            # Determine if it's a timeout or read error
+            if "timeout" in str(ex).lower():
+                raise ModbusTimeoutError(
+                    message=error_msg,
+                    address=int(register),
+                    slave_id=self._modbus_slave,
+                ) from ex
+            raise ModbusReadError(
+                message=error_msg,
+                address=int(register),
+                slave_id=self._modbus_slave,
+            ) from ex
+        except (ModbusReadError, ModbusTimeoutError):
+            # Re-raise our typed exceptions
+            raise
+        except Exception as ex:
+            error_msg = f"Unexpected error reading register {register}, length {length}: {ex}"
+            _LOGGER.exception(error_msg)
+            self._error_count += 1
+            if self._health_check:
+                self._health_check.record_failure(name="modbus", error=error_msg)
+            raise ModbusReadError(
+                message=error_msg,
+                address=int(register),
+                slave_id=self._modbus_slave,
+            ) from ex
+        else:
+            if self._health_check:
+                self._health_check.record_success(name="modbus")
+            return result

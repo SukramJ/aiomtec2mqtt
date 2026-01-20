@@ -21,23 +21,23 @@ from aiomtec2mqtt.mtec_coordinator import (
 class TestHelperFunctions:
     """Tests for coordinator helper functions."""
 
+    def test_get_equipment_info_known_and_unknown(self) -> None:
+        """_get_equipment_info should map numeric code pairs to model names or 'unknown'."""
+        assert _get_equipment_info(value="31 4") == "5.0K-30A-1P"
+        assert _get_equipment_info(value="99 99").lower() == "unknown"
+
     def test_has_bit_and_convert_code_int_and_bits(self) -> None:
         """_has_bit and _convert_code should work for both int codes and bitstrings."""
         # Simple bits check
-        assert _has_bit(0b1010, 1) is True
-        assert _has_bit(0b1010, 0) is False
+        assert _has_bit(val=0b1010, idx=1) is True
+        assert _has_bit(val=0b1010, idx=0) is False
 
         # For int value, direct mapping lookup
         items = {0: "Zero", 1: "One", 2: "Two"}
-        assert _convert_code(2, items) == "Two"
+        assert _convert_code(value=2, value_items=items) == "Two"
         # For bitstring, collect mapped bits; also return OK when none
-        assert _convert_code("0000 0010", items) == "One"
-        assert _convert_code("0000 0000", items) == "OK"
-
-    def test_get_equipment_info_known_and_unknown(self) -> None:
-        """_get_equipment_info should map numeric code pairs to model names or 'unknown'."""
-        assert _get_equipment_info("31 4") == "5.0K-30A-1P"
-        assert _get_equipment_info("99 99").lower() == "unknown"
+        assert _convert_code(value="0000 0010", value_items=items) == "One"
+        assert _convert_code(value="0000 0000", value_items=items) == "OK"
 
 
 class TestMqttPayloadFormatting:
@@ -52,7 +52,8 @@ class TestMqttPayloadFormatting:
                 published.append((topic, payload))
 
         # Build a lightweight object with attributes consumed by the method
-        self_like = SimpleNamespace(_mqtt_float_format="{:.2f}", _mqtt_client=DummyMQTT())
+        # Note: _mqtt_float_format should be without braces (e.g., ".2f" not "{:.2f}")
+        self_like = SimpleNamespace(_mqtt_float_format=".2f", _mqtt_client=DummyMQTT())
 
         pvdata = {
             "p1": {Register.VALUE: 3.14159},
@@ -60,7 +61,9 @@ class TestMqttPayloadFormatting:
             "p3": {Register.VALUE: "text"},
         }
         # Call unbound function with our fake self
-        MtecCoordinator.write_to_mqtt(self_like, pvdata, topic_base="base", group=RegisterGroup.PV)
+        MtecCoordinator.write_to_mqtt(
+            self_like, pvdata=pvdata, topic_base="base", group=RegisterGroup.PV
+        )
 
         topics = dict(published)
         assert topics["base/now-pv/p1/state"] == "3.14"
@@ -101,28 +104,13 @@ class TestModbusClient:
                 self._open = False
                 self._writes: list[tuple[int, int, int]] = []
 
+            def close(self) -> None:
+                self._open = False
+
             def connect(self) -> bool:
                 self._open = True
                 return True
 
-            def is_socket_open(self) -> bool:
-                return self._open
-
-            def close(self) -> None:
-                self._open = False
-
-            def read_holding_registers(self, address: int, count: int, device_id: int) -> Resp:
-                # Return a "ramp" of count numbers starting at address for predictable decoding
-                regs = list(range(address, address + count))
-                return Resp(regs)
-
-            def write_register(
-                self, address: int, value: int, device_id: int
-            ) -> types.SimpleNamespace:
-                self._writes.append((address, value, device_id))
-                return types.SimpleNamespace(isError=lambda: False)
-
-            # Convert using simple rules matching our tests
             def convert_from_registers(self, registers: list[int], data_type: object) -> int | str:
                 if data_type is self.DATATYPE.UINT16:
                     return int(registers[0])
@@ -138,6 +126,20 @@ class TestModbusClient:
                     # Produce a string with spaces and nulls to exercise rstrip path
                     return "ABC \x00  "
                 raise AssertionError("unexpected type")
+
+            def is_socket_open(self) -> bool:
+                return self._open
+
+            def read_holding_registers(self, address: int, count: int, device_id: int) -> Resp:
+                # Return a "ramp" of count numbers starting at address for predictable decoding
+                regs = list(range(address, address + count))
+                return Resp(regs)
+
+            def write_register(
+                self, address: int, value: int, device_id: int
+            ) -> types.SimpleNamespace:
+                self._writes.append((address, value, device_id))
+                return types.SimpleNamespace(isError=lambda: False)
 
         monkeypatch.setattr(modbus_mod, "ModbusTcpClient", FakeModbus)
 
@@ -184,7 +186,7 @@ class TestModbusClient:
             Config.MODBUS_TIMEOUT: 5,
         }
 
-        api = modbus_mod.MTECModbusClient(cfg, reg_map, groups)
+        api = modbus_mod.MTECModbusClient(config=cfg, register_map=reg_map, register_groups=groups)
         assert api.connect() is True
 
         # Read all registers (None) triggers cluster generation and decoding
@@ -199,13 +201,13 @@ class TestModbusClient:
         assert data["10014"][Register.VALUE] == "ABC"  # stripped
 
         # Test write by name with display value mapping and scale handling
-        assert api.write_register_by_name("set", "On") is True
+        assert api.write_register_by_name(name="set", value="On") is True
 
         # Direct write with invalid register
-        assert api.write_register("99999", 1) is False
+        assert api.write_register(register="99999", value=1) is False
 
         # Read specific registers triggers caching key path
-        cluster = api._get_register_clusters(["10000", "10001", "XYZ"])  # noqa: SLF001
+        cluster = api._get_register_clusters(registers=["10000", "10001", "XYZ"])  # noqa: SLF001
         assert isinstance(cluster, list)
 
         api.disconnect()
@@ -220,14 +222,14 @@ class TestModbusClient:
             def __init__(self, *a: Any, **k: Any) -> None:
                 pass
 
+            def close(self) -> None:  # noqa: D401 - no-op
+                pass
+
             def connect(self) -> bool:
                 return True
 
             def is_socket_open(self) -> bool:
                 return True
-
-            def close(self) -> None:  # noqa: D401 - no-op
-                pass
 
             def write_register(
                 self, address: int, value: int, device_id: int
@@ -259,14 +261,14 @@ class TestModbusClient:
             Config.MODBUS_SLAVE: 1,
             Config.MODBUS_TIMEOUT: 5,
         }
-        api = modbus_mod.MTECModbusClient(cfg, reg_map, ["g"])  # type: ignore[list-item]
+        api = modbus_mod.MTECModbusClient(config=cfg, register_map=reg_map, register_groups=["g"])  # type: ignore[list-item]
 
         # RO register
-        assert api.write_register("1", 1) is False
+        assert api.write_register(register="1", value=1) is False
         # Invalid numeric string
-        assert api.write_register("2", "not-a-number") is False
+        assert api.write_register(register="2", value="not-a-number") is False
         # Error response from client
-        assert api.write_register("2", 1) is False
+        assert api.write_register(register="2", value=1) is False
 
 
 class TestUtilityFunctions:
@@ -324,7 +326,7 @@ class TestUtilityFunctions:
         from aiomtec2mqtt.util import mtec_util as util
 
         api = FakeApi()
-        util.list_register_config(api)  # should log lines
-        util.list_register_config_by_groups(api)  # should log per-group listings
+        util.list_register_config(api=api)  # should log lines
+        util.list_register_config_by_groups(api=api)  # should log per-group listings
         # smoke test: no exceptions and at least one log record produced
         assert caplog.records != []

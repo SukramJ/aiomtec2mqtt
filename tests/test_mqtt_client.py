@@ -29,6 +29,25 @@ def dummy_on_message(client: Any, userdata: Any, message: Any) -> None:
 class TestMqttClient:
     """Tests for MQTT client initialization, connection, and messaging."""
 
+    def test_hass_subscription_on_connect(
+        self, fake_paho: dict[str, Any], base_config: dict[str, Any]
+    ) -> None:
+        """When hass integration is provided, the client subscribes to its status topic on connect."""
+
+        # Build a tiny hass object with required attribute only for the constructor to consider it truthy
+        class DummyHass:
+            pass
+
+        hass = DummyHass()
+        client = mqtt_mod.MqttClient(
+            config=base_config, on_mqtt_message=dummy_on_message, hass=hass
+        )  # type: ignore[arg-type]
+        fake = fake_paho["client"]
+        # After loop_start, on_connect subscribes to hass status topic
+        hass_status = f"{base_config[Config.HASS_BASE_TOPIC]}/status"
+        assert hass_status in fake.subscribed
+        client.stop()
+
     def test_initialize_and_connects(
         self, fake_paho: dict[str, Any], base_config: dict[str, Any]
     ) -> None:
@@ -53,37 +72,18 @@ class TestMqttClient:
         )
 
         # subscribe while connected -> paho subscribe is called
-        client.subscribe_to_topic("homeassistant/status")
-        client.subscribe_to_topic("some/topic")
-        client.subscribe_to_topic("some/topic")  # second time is a no-op
+        client.subscribe_to_topic(topic="homeassistant/status")
+        client.subscribe_to_topic(topic="some/topic")
+        client.subscribe_to_topic(topic="some/topic")  # second time is a no-op
 
         fake = fake_paho["client"]
         assert sorted(fake.subscribed) == ["homeassistant/status", "some/topic"]
 
-        client.publish("a/b", "hello", retain=False)
-        client.publish("a/b", "world", retain=True)
+        client.publish(topic="a/b", payload="hello", retain=False)
+        client.publish(topic="a/b", payload="world", retain=True)
         assert fake.published[-1] == ("a/b", "world", 0, True)
 
-        client.unsubscribe_from_topic("some/topic")
+        client.unsubscribe_from_topic(topic="some/topic")
         assert "some/topic" in fake.unsubscribed
 
-        client.stop()
-
-    def test_hass_subscription_on_connect(
-        self, fake_paho: dict[str, Any], base_config: dict[str, Any]
-    ) -> None:
-        """When hass integration is provided, the client subscribes to its status topic on connect."""
-
-        # Build a tiny hass object with required attribute only for the constructor to consider it truthy
-        class DummyHass:
-            pass
-
-        hass = DummyHass()
-        client = mqtt_mod.MqttClient(
-            config=base_config, on_mqtt_message=dummy_on_message, hass=hass
-        )  # type: ignore[arg-type]
-        fake = fake_paho["client"]
-        # After loop_start, on_connect subscribes to hass status topic
-        hass_status = f"{base_config[Config.HASS_BASE_TOPIC]}/status"
-        assert hass_status in fake.subscribed
         client.stop()

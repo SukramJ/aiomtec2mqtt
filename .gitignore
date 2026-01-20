@@ -14,3 +14,4 @@ __pycache__/
 /venv
 /.idea
 .coverage
+/aiomtec2mqtt.egg-info

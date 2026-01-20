@@ -2,7 +2,7 @@
 A test utility for MTEC Modbus API.
 
 (c) 2023 by Christian Rödel
-(c) 2024 by SukramJ
+(c) 2026 by SukramJ
 """
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from aiomtec2mqtt.const import Register, RegisterGroup
 _LOGGER: Final = logging.getLogger(__name__)
 
 
-def read_register(api: modbus_client.MTECModbusClient) -> None:
+def read_register(*, api: modbus_client.MTECModbusClient) -> None:
     """Read register."""
     _LOGGER.info("-------------------------------------")
     register = input("Register: ")
@@ -31,7 +31,7 @@ def read_register(api: modbus_client.MTECModbusClient) -> None:
         )
 
 
-def read_register_group(api: modbus_client.MTECModbusClient) -> None:
+def read_register_group(*, api: modbus_client.MTECModbusClient) -> None:
     """Read register group."""
     _LOGGER.info("-------------------------------------")
     line = "Groups: "
@@ -56,7 +56,7 @@ def read_register_group(api: modbus_client.MTECModbusClient) -> None:
             )
 
 
-def write_register(api: modbus_client.MTECModbusClient) -> None:
+def write_register(*, api: modbus_client.MTECModbusClient) -> None:
     """Write register."""
     _LOGGER.info("-------------------------------------")
     _LOGGER.info("Current settings of writable registers:")
@@ -87,7 +87,7 @@ def write_register(api: modbus_client.MTECModbusClient) -> None:
         _LOGGER.info("Write aborted by user")
 
 
-def list_register_config(api: modbus_client.MTECModbusClient) -> None:
+def list_register_config(*, api: modbus_client.MTECModbusClient) -> None:
     """List register config."""
     _LOGGER.info("-------------------------------------")
     _LOGGER.info(
@@ -111,7 +111,7 @@ def list_register_config(api: modbus_client.MTECModbusClient) -> None:
         )
 
 
-def list_register_config_by_groups(api: modbus_client.MTECModbusClient) -> None:
+def list_register_config_by_groups(*, api: modbus_client.MTECModbusClient) -> None:
     """List register config by groups."""
     for group in api.register_groups:
         _LOGGER.info("-------------------------------------")

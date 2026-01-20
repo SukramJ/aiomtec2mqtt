@@ -10,6 +10,17 @@ import pytest
 class TestConfigLoading:
     """Tests for configuration file loading."""
 
+    def test_init_config_invalid_yaml(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """init_config should ignore invalid YAML and return empty when not found elsewhere."""
+        from aiomtec2mqtt.config import init_config
+
+        tmp_path.joinpath("config.yaml").write_text("not: [valid\n yaml")
+        monkeypatch.chdir(tmp_path)
+
+        assert init_config() == {}
+
     def test_init_config_reads_from_cwd(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -48,17 +59,6 @@ class TestConfigLoading:
         # a couple of sanity checks
         assert loaded["DEBUG"] is True
         assert loaded["MQTT_SERVER"] == "localhost"
-
-    def test_init_config_invalid_yaml(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        """init_config should ignore invalid YAML and return empty when not found elsewhere."""
-        from aiomtec2mqtt.config import init_config
-
-        tmp_path.joinpath("config.yaml").write_text("not: [valid\n yaml")
-        monkeypatch.chdir(tmp_path)
-
-        assert init_config() == {}
 
 
 class TestConfigFileCreation:

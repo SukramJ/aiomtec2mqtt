@@ -1,0 +1,131 @@
+# Prometheus Alerting Rules for aiomtec2mqtt
+# Deploy this file to your Prometheus server's rules directory
+
+groups:
+  - name: aiomtec2mqtt_connection_alerts
+    interval: 30s
+    rules:
+      - alert: ModbusDisconnected
+        expr: aiomtec2mqtt_modbus_connected == 0
+        for: 5m
+        labels:
+          severity: critical
+          component: modbus
+        annotations:
+          summary: "Modbus connection is down"
+          description: "Modbus connection has been disconnected for more than 5 minutes."
+
+      - alert: MQTTDisconnected
+        expr: aiomtec2mqtt_mqtt_connected == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: mqtt
+        annotations:
+          summary: "MQTT connection is down"
+          description: "MQTT connection has been disconnected for more than 2 minutes."
+
+  - name: aiomtec2mqtt_health_alerts
+    interval: 30s
+    rules:
+      - alert: ComponentUnhealthy
+        expr: aiomtec2mqtt_health_status >= 3
+        for: 5m
+        labels:
+          severity: warning
+          component: "{{ $labels.component }}"
+        annotations:
+          summary: "Component {{ $labels.component }} is unhealthy"
+          description: "Component {{ $labels.component }} has been in UNHEALTHY state for more than 5 minutes."
+
+      - alert: ComponentDegraded
+        expr: aiomtec2mqtt_health_status == 2
+        for: 10m
+        labels:
+          severity: warning
+          component: "{{ $labels.component }}"
+        annotations:
+          summary: "Component {{ $labels.component }} is degraded"
+          description: "Component {{ $labels.component }} has been in DEGRADED state for more than 10 minutes."
+
+  - name: aiomtec2mqtt_error_alerts
+    interval: 30s
+    rules:
+      - alert: HighErrorRate
+        expr: rate(aiomtec2mqtt_errors_total[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: "{{ $labels.component }}"
+        annotations:
+          summary: "High error rate in {{ $labels.component }}"
+          description: "Error rate for {{ $labels.component }} ({{ $labels.error_type }}) is above 10 errors/minute for 5 minutes."
+
+      - alert: NoDataReceived
+        expr: time() - aiomtec2mqtt_last_successful_modbus_read_timestamp_seconds > 30
+        for: 1m
+        labels:
+          severity: warning
+          component: modbus
+        annotations:
+          summary: "No data received from Modbus"
+          description: "No successful Modbus reads for more than 30 seconds."
+
+  - name: aiomtec2mqtt_performance_alerts
+    interval: 30s
+    rules:
+      - alert: HighModbusLatency
+        expr: histogram_quantile(0.95, sum(rate(aiomtec2mqtt_modbus_read_duration_seconds_bucket[5m])) by (le, group)) > 5
+        for: 5m
+        labels:
+          severity: warning
+          component: modbus
+        annotations:
+          summary: "High Modbus read latency for {{ $labels.group }}"
+          description: "95th percentile Modbus read latency for {{ $labels.group }} is above 5 seconds for 5 minutes."
+
+      - alert: HighMQTTLatency
+        expr: histogram_quantile(0.95, sum(rate(aiomtec2mqtt_mqtt_publish_duration_seconds_bucket[5m])) by (le, topic)) > 1
+        for: 5m
+        labels:
+          severity: warning
+          component: mqtt
+        annotations:
+          summary: "High MQTT publish latency for {{ $labels.topic }}"
+          description: "95th percentile MQTT publish latency for {{ $labels.topic }} is above 1 second for 5 minutes."
+
+  - name: aiomtec2mqtt_circuit_breaker_alerts
+    interval: 30s
+    rules:
+      - alert: CircuitBreakerOpen
+        expr: aiomtec2mqtt_circuit_breaker_state == 1
+        for: 2m
+        labels:
+          severity: warning
+          component: "{{ $labels.component }}"
+        annotations:
+          summary: "Circuit breaker open for {{ $labels.component }}"
+          description: "Circuit breaker for {{ $labels.component }} has been OPEN for more than 2 minutes, indicating repeated failures."
+
+  - name: aiomtec2mqtt_data_alerts
+    interval: 30s
+    rules:
+      - alert: BatterySOCCritical
+        expr: aiomtec2mqtt_battery_soc_percent < 10
+        for: 5m
+        labels:
+          severity: critical
+          component: battery
+        annotations:
+          summary: "Battery SOC critically low"
+          description: "Battery state of charge is below 10% for more than 5 minutes."
+
+      - alert: BatterySOCLow
+        expr: aiomtec2mqtt_battery_soc_percent < 20
+        for: 10m
+        labels:
+          severity: warning
+          component: battery
+        annotations:
+          summary: "Battery SOC low"
+          description: "Battery state of charge is below 20% for more than 10 minutes."

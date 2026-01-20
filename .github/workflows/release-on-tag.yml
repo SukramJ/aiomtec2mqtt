@@ -1,0 +1,123 @@
+# This workflow creates a GitHub Release when a tag is pushed,
+# extracting release notes from CHANGELOG.md.
+#
+# Prereqs/assumptions:
+# - CHANGELOG.md exists at repo root with version sections
+# - Version sections follow format: "## [1.0.0] - 2026-01-20"
+# - Tags follow format: v1.0.0 or 1.0.0
+#
+# Result:
+# - Creates GitHub Release with extracted changelog section
+# - Triggers python-publish workflow via repository_dispatch
+
+name: Release on Tag
+
+# yamllint disable-line rule:truthy
+on:
+  push:
+    tags:
+      - "v*"
+      - "[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+
+jobs:
+  create_release:
+    if: github.repository_owner == 'SukramJ'
+    name: Create GitHub Release from CHANGELOG
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Determine version from tag
+        id: vars
+        run: |
+          TAG_NAME="${GITHUB_REF_NAME}"
+          # Strip a leading 'v' to map tags like v1.0.0 -> 1.0.0
+          VERSION="${TAG_NAME#v}"
+          echo "TAG_NAME=${TAG_NAME}" >> "$GITHUB_ENV"
+          echo "VERSION=${VERSION}" >> "$GITHUB_ENV"
+          echo "Tag: $TAG_NAME -> Version: $VERSION"
+
+      - name: Extract release notes from CHANGELOG.md
+        id: notes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ ! -f CHANGELOG.md ]; then
+            echo "CHANGELOG.md not found at repo root" >&2
+            exit 1
+          fi
+
+          # Extract the section that starts at the matching header and ends before the next header
+          # Header format expected: "## [1.0.0] - YYYY-MM-DD"
+          # We extract everything between ## [VERSION] and the next ## [
+          awk -v ver="${VERSION}" '
+            /^## \[/ {
+              if (insec) exit
+              if ($0 ~ "^## \\[" ver "\\]") { insec=1; next }
+            }
+            insec { print }
+          ' CHANGELOG.md > RELEASE_NOTES.md || true
+
+          if [ ! -s RELEASE_NOTES.md ]; then
+            echo "No matching section found in CHANGELOG.md for version '${VERSION}'." >&2
+            echo "Expected a line starting with: '## [${VERSION}] -'" >&2
+            echo "Using default release notes instead." >&2
+            echo "Release ${VERSION}" > RELEASE_NOTES.md
+            echo "" >> RELEASE_NOTES.md
+            echo "See [CHANGELOG.md](https://github.com/${GITHUB_REPOSITORY}/blob/main/CHANGELOG.md) for details." >> RELEASE_NOTES.md
+          fi
+
+          # Try to determine previous version from CHANGELOG.md
+          PREV_VERSION=$(awk -v ver="${VERSION}" '
+            $0 ~ "^## \\[" ver "\\]" { insec=1; next }
+            insec && /^## \[/ {
+              if (match($0, /^## \[([^\]]+)\]/, m)) { print m[1]; exit }
+            }
+          ' CHANGELOG.md) || true
+
+          # Append Full Changelog link
+          REPO="${GITHUB_REPOSITORY}"
+          if [ -n "$PREV_VERSION" ]; then
+            FULL_LINK="**Full Changelog**: https://github.com/${REPO}/compare/v${PREV_VERSION}...v${VERSION}"
+          else
+            FULL_LINK="**Full Changelog**: https://github.com/${REPO}/commits/v${VERSION}"
+          fi
+
+          # Avoid duplicates if rerun
+          if ! grep -Fq "$FULL_LINK" RELEASE_NOTES.md; then
+            printf "\n---\n\n%s\n" "$FULL_LINK" >> RELEASE_NOTES.md
+          fi
+
+          echo "=== Extracted release notes ==="
+          cat RELEASE_NOTES.md
+          echo "==============================="
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.TAG_NAME }}
+          name: "aiomtec2mqtt ${{ env.VERSION }}"
+          body_path: RELEASE_NOTES.md
+          draft: false
+          prerelease: false
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Trigger python-publish workflow
+        run: |
+          set -euo pipefail
+          REPO="${GITHUB_REPOSITORY}"
+          API="https://api.github.com/repos/${REPO}/dispatches"
+          echo "Dispatching event 'release-on-tag-succeeded' for tag ${TAG_NAME}"
+          curl -sSf -X POST "${API}" \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            -d "{\"event_type\":\"release-on-tag-succeeded\",\"client_payload\":{\"tag\":\"${TAG_NAME}\",\"version\":\"${VERSION}\"}}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

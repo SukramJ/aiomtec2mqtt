@@ -1,8 +1,8 @@
-# CLAUDE.md - Project Guide for aioaiomtec2mqtt
+# CLAUDE.md - Project Guide for aiomtec2mqtt
 
 ## Project Overview
 
-`aioaiomtec2mqtt` is a Python application that bridges M-TEC Energybutler (hybrid inverter/battery system) with MQTT brokers for home automation and energy management. It reads data via Modbus RTU protocol and publishes to MQTT, enabling integration with Home Assistant, evcc, and other EMS tools.
+`aiomtec2mqtt` is a Python application that bridges M-TEC Energybutler (hybrid inverter/battery system) with MQTT brokers for home automation and energy management. It reads data via Modbus RTU protocol and publishes to MQTT, enabling integration with Home Assistant, evcc, and other EMS tools.
 
 **Key Features:**
 
@@ -18,9 +18,9 @@
 ### Data Flow
 
 ```
-M-TEC Energybutler (Modbus RTU) → aioaiomtec2mqtt → MQTT Broker → Home Assistant/evcc/EMS
-                                                     ↓
-                                             YAML Config File
+M-TEC Energybutler (Modbus RTU) → aiomtec2mqtt → MQTT Broker → Home Assistant/evcc/EMS
+                                                  ↓
+                                          YAML Config File
 ```
 
 ### Key Components
@@ -35,8 +35,8 @@ M-TEC Energybutler (Modbus RTU) → aioaiomtec2mqtt → MQTT Broker → Home Ass
 ### Directory Structure
 
 ```
-aioaiomtec2mqtt/
-├── aioaiomtec2mqtt/        # Main package
+aiomtec2mqtt/
+├── aiomtec2mqtt/        # Main package
 │   ├── modbus_client.py # Modbus communication
 │   ├── mqtt_client.py   # MQTT publishing
 │   ├── hass_int.py      # Home Assistant integration
@@ -73,17 +73,17 @@ pip install -r requirements_test.txt
 
 ```bash
 # Run all tests with coverage
-pytest tests/ --cov=aioaiomtec2mqtt
+pytest tests/ --cov=aiomtec2mqtt
 
 # Run with coverage report
 ./cov.sh
 
 # Type checking
-mypy aioaiomtec2mqtt/
+mypy aiomtec2mqtt/
 
 # Linting
-ruff check aioaiomtec2mqtt/
-pylint aioaiomtec2mqtt/
+ruff check aiomtec2mqtt/
+pylint aiomtec2mqtt/
 ```
 
 ### Pre-commit Hooks
@@ -100,8 +100,8 @@ pre-commit run --all-files
 
 The application reads from `config.yaml` in the platform-specific config directory:
 
-- Linux: `~/.config/aioaiomtec2mqtt/config.yaml`
-- Windows: `C:\Users\<user>\AppData\Roaming\aioaiomtec2mqtt\config.yaml`
+- Linux: `~/.config/aiomtec2mqtt/config.yaml`
+- Windows: `C:\Users\<user>\AppData\Roaming\aiomtec2mqtt\config.yaml`
 
 **Important Configuration Notes:**
 
@@ -237,16 +237,16 @@ aiomtec_util  # Choose option 1
 aiomtec_util  # Choose option 3
 
 # Export data to CSV
-mtec_export -g all -c -f output.csv
+aiomtec_export -g all -c -f output.csv
 
 # Run tests with verbose output
 pytest -v tests/
 
 # Type check
-mypy aioaiomtec2mqtt/
+mypy aiomtec2mqtt/
 
 # Format and lint
-ruff format aioaiomtec2mqtt/
+ruff format aiomtec2mqtt/
 ruff check --fix aiomtec2mqtt/
 ```
 

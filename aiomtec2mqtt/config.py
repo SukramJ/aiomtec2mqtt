@@ -2,7 +2,7 @@
 Read YAML config files.
 
 (c) 2024 by Christian Rödel
-(c) 2024 by SukramJ
+(c) 2026 by SukramJ
 """
 
 from __future__ import annotations

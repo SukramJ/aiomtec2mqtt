@@ -7,7 +7,7 @@ register groups, publishing to the configured MQTT topic tree, and graceful
 shutdown on OS signals.
 
 (c) 2024 by Christian Rödel
-(c) 2024 by SukramJ
+(c) 2026 by SukramJ
 """
 
 from __future__ import annotations
@@ -15,7 +15,6 @@ from __future__ import annotations
 import contextlib
 from datetime import datetime, timedelta
 import logging
-import signal
 import threading
 import time
 from typing import Any, Final
@@ -33,18 +32,11 @@ from aiomtec2mqtt.const import (
     Register,
     RegisterGroup,
 )
+from aiomtec2mqtt.shutdown import get_shutdown_manager
 
 _LOGGER: Final = logging.getLogger(__name__)
 
 PVDATA_TYPE = dict[str, dict[str, Any] | int | float | str | bool]
-run_status = False
-
-
-def signal_handler(signal_number: int, _: Any) -> None:
-    """Signal shutdown."""
-    global run_status  # noqa: PLW0603  # pylint: disable=global-statement
-    _LOGGER.warning("Received Signal %s. Graceful shutdown initiated.", signal_number)
-    run_status = False
 
 
 class MtecCoordinator:
@@ -82,7 +74,10 @@ class MtecCoordinator:
             # Fallback: compute lazily if anything unexpected happens
             self._registers_by_group = {}
 
-        self._mqtt_float_format: Final[str] = config[Config.MQTT_FLOAT_FORMAT]
+        # Get float format and normalize it (e.g., "{:.3f}" or ":.3f" -> ".3f")
+        mqtt_float_format_raw = config.get(Config.MQTT_FLOAT_FORMAT, ".3f")
+        # Strip braces and leading colon to get clean format spec
+        self._mqtt_float_format: Final[str] = mqtt_float_format_raw.strip("{}").lstrip(":")
         self._mqtt_refresh_config: Final[int] = config.get(
             Config.REFRESH_CONFIG, REFRESH_DEFAULTS[Config.REFRESH_CONFIG]
         )
@@ -107,159 +102,7 @@ class MtecCoordinator:
             logging.getLogger().setLevel(level=logging.DEBUG)
         _LOGGER.info("Starting")
 
-    def stop(self) -> None:
-        """Stop the coordinator."""
-        # clean up
-        # if self._hass:
-        #    hass.send_unregister_info()
-        if self._hass_birth_timer is not None:
-            with contextlib.suppress(Exception):
-                self._hass_birth_timer.cancel()
-            self._hass_birth_timer = None
-        self._modbus_client.disconnect()
-        self._mqtt_client.stop()
-        _LOGGER.info("Stopping clients")
-
-    def _reconnect_modbus(self) -> None:
-        """Reconnect to modbus/mqtt."""
-        _LOGGER.info("Reconnecting modbus client.")
-        self._modbus_client.disconnect()
-        time.sleep(10)
-        self._modbus_client.connect()
-        _LOGGER.info("Reconnected modbus client.")
-
-    def run(self) -> None:
-        """Run the coordinator."""
-        next_read_config = datetime.now()
-        next_read_day = datetime.now()
-        next_read_total = datetime.now()
-        next_read_static = datetime.now()
-        now_ext_idx = 0
-        sec_groups_len = len(SECONDARY_REGISTER_GROUPS)
-
-        self._modbus_client.connect()
-
-        # Initialize
-        pv_config: PVDATA_TYPE | None = None
-        while not pv_config:
-            if not (pv_config := self.read_mtec_data(group=RegisterGroup.STATIC)):
-                _LOGGER.warning("Can't retrieve initial config - retry in 10 s")
-                time.sleep(10)
-
-        serial_no = pv_config[Register.SERIAL_NO][Register.VALUE]  # type: ignore[index]
-        firmware_version = pv_config[Register.FIRMWARE_VERSION][Register.VALUE]  # type: ignore[index]
-        equipment_info = pv_config[Register.EQUIPMENT_INFO][Register.VALUE]  # type: ignore[index]
-        topic_base = f"{self._mqtt_topic}/{serial_no}"
-        if self._hass and not self._hass.is_initialized:
-            self._hass.initialize(
-                mqtt=self._mqtt_client,
-                serial_no=serial_no,
-                firmware_version=firmware_version,
-                equipment_info=equipment_info,
-            )
-
-        # Main loop - exit on signal only
-        while run_status:
-            # check if modbus is alive and reconnect if necessary
-            if self._modbus_client.error_count > 10:
-                self._reconnect_modbus()
-
-            now = datetime.now()
-
-            # Now base
-            if pvdata := self.read_mtec_data(group=RegisterGroup.BASE):
-                self.write_to_mqtt(pvdata=pvdata, topic_base=topic_base, group=RegisterGroup.BASE)
-
-            # Config
-            if next_read_config <= now and (
-                pvdata := self.read_mtec_data(group=RegisterGroup.CONFIG)
-            ):
-                self.write_to_mqtt(
-                    pvdata=pvdata, topic_base=topic_base, group=RegisterGroup.CONFIG
-                )
-                next_read_config = now + timedelta(seconds=self._mqtt_refresh_config)
-
-            # Now extended - read groups in a round-robin - one per loop
-            if sec_groups_len:
-                if (group := SECONDARY_REGISTER_GROUPS.get(now_ext_idx)) and (
-                    pvdata := self.read_mtec_data(group=group)
-                ):
-                    self.write_to_mqtt(pvdata=pvdata, topic_base=topic_base, group=group)
-
-                # advance round-robin index efficiently without magic numbers
-                now_ext_idx = (now_ext_idx + 1) % sec_groups_len
-
-            # Day
-            if next_read_day <= now and (pvdata := self.read_mtec_data(group=RegisterGroup.DAY)):
-                self.write_to_mqtt(pvdata=pvdata, topic_base=topic_base, group=RegisterGroup.DAY)
-                next_read_day = now + timedelta(seconds=self._mqtt_refresh_day)
-
-            # Total
-            if next_read_total <= now and (
-                pvdata := self.read_mtec_data(group=RegisterGroup.TOTAL)
-            ):
-                self.write_to_mqtt(pvdata=pvdata, topic_base=topic_base, group=RegisterGroup.TOTAL)
-                next_read_total = now + timedelta(seconds=self._mqtt_refresh_total)
-
-            # Static
-            if next_read_static <= now and (
-                pvdata := self.read_mtec_data(group=RegisterGroup.STATIC)
-            ):
-                self.write_to_mqtt(
-                    pvdata=pvdata, topic_base=topic_base, group=RegisterGroup.STATIC
-                )
-                next_read_static = now + timedelta(seconds=self._mqtt_refresh_static)
-
-            _LOGGER.debug("Sleep %ss", self._mqtt_refresh_now)
-            time.sleep(self._mqtt_refresh_now)
-
-    def _on_mqtt_message(
-        self,
-        client: Any,
-        userdata: Any,
-        message: paho.MQTTMessage,
-    ) -> None:
-        """Handle received message."""
-        try:
-            msg = message.payload.decode(UTF8)
-            if (topic := message.topic) == self._hass_status_topic:
-                if msg == "online" and self._hass is not None:
-                    gracetime = self._hass_birth_gracetime
-                    _LOGGER.info(
-                        "Received HASS online message. Scheduling discovery info in %i sec",
-                        gracetime,
-                    )
-                    # Avoid blocking the MQTT network thread; schedule delayed discovery
-                    if self._hass_birth_timer is not None:
-                        with contextlib.suppress(Exception):
-                            self._hass_birth_timer.cancel()
-                    self._hass_birth_timer = threading.Timer(
-                        interval=gracetime, function=self._send_hass_discovery
-                    )
-                    self._hass_birth_timer.daemon = True
-                    self._hass_birth_timer.start()
-                elif msg == "offline":
-                    _LOGGER.info("Received HASS offline message.")
-            elif (topic_parts := message.topic.split("/")) is not None and len(topic_parts) >= 4:
-                register_name = topic_parts[3]
-                self._modbus_client.write_register_by_name(name=register_name, value=msg)
-            else:
-                _LOGGER.warning("Received topic %s is not usable.", topic)
-        except Exception as ex:
-            _LOGGER.warning("Error while handling MQTT message: %s", ex)
-
-    def _send_hass_discovery(self) -> None:
-        """Send Home Assistant discovery info after grace period (timer callback)."""
-        try:
-            if self._hass is not None:
-                self._hass.send_discovery_info()
-        except Exception as ex:  # defensive
-            _LOGGER.warning("Failed to send HASS discovery info: %s", ex)
-        finally:
-            # clear the timer reference
-            self._hass_birth_timer = None
-
-    def read_mtec_data(self, group: RegisterGroup) -> PVDATA_TYPE:
+    def read_mtec_data(self, *, group: RegisterGroup) -> PVDATA_TYPE:
         """Read data from MTEC modbus."""
         _LOGGER.info("Reading registers for group: %s", group)
         if (registers := self._registers_by_group.get(group)) is None:
@@ -353,7 +196,106 @@ class MtecCoordinator:
             return {}
         return pvdata
 
-    def write_to_mqtt(self, pvdata: PVDATA_TYPE, topic_base: str, group: RegisterGroup) -> None:
+    def run(self) -> None:
+        """Run the coordinator."""
+        next_read_config = datetime.now()
+        next_read_day = datetime.now()
+        next_read_total = datetime.now()
+        next_read_static = datetime.now()
+        now_ext_idx = 0
+        sec_groups_len = len(SECONDARY_REGISTER_GROUPS)
+
+        self._modbus_client.connect()
+
+        # Initialize
+        pv_config: PVDATA_TYPE | None = None
+        while not pv_config:
+            if not (pv_config := self.read_mtec_data(group=RegisterGroup.STATIC)):
+                _LOGGER.warning("Can't retrieve initial config - retry in 10 s")
+                time.sleep(10)
+
+        serial_no = pv_config[Register.SERIAL_NO][Register.VALUE]  # type: ignore[index]
+        firmware_version = pv_config[Register.FIRMWARE_VERSION][Register.VALUE]  # type: ignore[index]
+        equipment_info = pv_config[Register.EQUIPMENT_INFO][Register.VALUE]  # type: ignore[index]
+        topic_base = f"{self._mqtt_topic}/{serial_no}"
+        if self._hass and not self._hass.is_initialized:
+            self._hass.initialize(
+                mqtt=self._mqtt_client,
+                serial_no=serial_no,
+                firmware_version=firmware_version,
+                equipment_info=equipment_info,
+            )
+
+        # Main loop - exit on shutdown signal only
+        shutdown_manager = get_shutdown_manager()
+        while not shutdown_manager.should_shutdown():
+            # check if modbus is alive and reconnect if necessary
+            if self._modbus_client.error_count > 10:
+                self._reconnect_modbus()
+
+            now = datetime.now()
+
+            # Now base
+            if pvdata := self.read_mtec_data(group=RegisterGroup.BASE):
+                self.write_to_mqtt(pvdata=pvdata, topic_base=topic_base, group=RegisterGroup.BASE)
+
+            # Config
+            if next_read_config <= now and (
+                pvdata := self.read_mtec_data(group=RegisterGroup.CONFIG)
+            ):
+                self.write_to_mqtt(
+                    pvdata=pvdata, topic_base=topic_base, group=RegisterGroup.CONFIG
+                )
+                next_read_config = now + timedelta(seconds=self._mqtt_refresh_config)
+
+            # Now extended - read groups in a round-robin - one per loop
+            if sec_groups_len:
+                if (group := SECONDARY_REGISTER_GROUPS.get(now_ext_idx)) and (
+                    pvdata := self.read_mtec_data(group=group)
+                ):
+                    self.write_to_mqtt(pvdata=pvdata, topic_base=topic_base, group=group)
+
+                # advance round-robin index efficiently without magic numbers
+                now_ext_idx = (now_ext_idx + 1) % sec_groups_len
+
+            # Day
+            if next_read_day <= now and (pvdata := self.read_mtec_data(group=RegisterGroup.DAY)):
+                self.write_to_mqtt(pvdata=pvdata, topic_base=topic_base, group=RegisterGroup.DAY)
+                next_read_day = now + timedelta(seconds=self._mqtt_refresh_day)
+
+            # Total
+            if next_read_total <= now and (
+                pvdata := self.read_mtec_data(group=RegisterGroup.TOTAL)
+            ):
+                self.write_to_mqtt(pvdata=pvdata, topic_base=topic_base, group=RegisterGroup.TOTAL)
+                next_read_total = now + timedelta(seconds=self._mqtt_refresh_total)
+
+            # Static
+            if next_read_static <= now and (
+                pvdata := self.read_mtec_data(group=RegisterGroup.STATIC)
+            ):
+                self.write_to_mqtt(
+                    pvdata=pvdata, topic_base=topic_base, group=RegisterGroup.STATIC
+                )
+                next_read_static = now + timedelta(seconds=self._mqtt_refresh_static)
+
+            _LOGGER.debug("Sleep %ss", self._mqtt_refresh_now)
+            time.sleep(self._mqtt_refresh_now)
+
+    def stop(self) -> None:
+        """Stop the coordinator."""
+        # clean up
+        # if self._hass:
+        #    hass.send_unregister_info()
+        if self._hass_birth_timer is not None:
+            with contextlib.suppress(Exception):
+                self._hass_birth_timer.cancel()
+            self._hass_birth_timer = None
+        self._modbus_client.disconnect()
+        self._mqtt_client.stop()
+        _LOGGER.info("Stopping clients")
+
+    def write_to_mqtt(self, *, pvdata: PVDATA_TYPE, topic_base: str, group: RegisterGroup) -> None:
         """Write data to MQTT."""
         fmt = self._mqtt_float_format
         publish = self._mqtt_client.publish
@@ -364,15 +306,69 @@ class MtecCoordinator:
             value = data[RV] if isinstance(data, dict) else data
 
             if isinstance(value, float):
-                payload = fmt.format(value)
+                payload = f"{value:{fmt}}"
             elif isinstance(value, bool):
                 payload = "1" if value else "0"
             else:
                 payload = str(value)
             publish(topic=topic, payload=payload)
 
+    def _on_mqtt_message(  # kwonly: disable
+        self,
+        client: Any,
+        userdata: Any,
+        message: paho.MQTTMessage,
+    ) -> None:
+        """Handle received message."""
+        try:
+            msg = message.payload.decode(UTF8)
+            if (topic := message.topic) == self._hass_status_topic:
+                if msg == "online" and self._hass is not None:
+                    gracetime = self._hass_birth_gracetime
+                    _LOGGER.info(
+                        "Received HASS online message. Scheduling discovery info in %i sec",
+                        gracetime,
+                    )
+                    # Avoid blocking the MQTT network thread; schedule delayed discovery
+                    if self._hass_birth_timer is not None:
+                        with contextlib.suppress(Exception):
+                            self._hass_birth_timer.cancel()
+                    self._hass_birth_timer = threading.Timer(
+                        interval=gracetime, function=self._send_hass_discovery
+                    )
+                    self._hass_birth_timer.daemon = True
+                    self._hass_birth_timer.start()
+                elif msg == "offline":
+                    _LOGGER.info("Received HASS offline message.")
+            elif (topic_parts := message.topic.split("/")) is not None and len(topic_parts) >= 4:
+                register_name = topic_parts[3]
+                self._modbus_client.write_register_by_name(name=register_name, value=msg)
+            else:
+                _LOGGER.warning("Received topic %s is not usable.", topic)
+        except Exception as ex:
+            _LOGGER.warning("Error while handling MQTT message: %s", ex)
 
-def _convert_code(value: int | str, value_items: dict[int, str]) -> str:
+    def _reconnect_modbus(self) -> None:
+        """Reconnect to modbus/mqtt."""
+        _LOGGER.info("Reconnecting modbus client.")
+        self._modbus_client.disconnect()
+        time.sleep(10)
+        self._modbus_client.connect()
+        _LOGGER.info("Reconnected modbus client.")
+
+    def _send_hass_discovery(self) -> None:
+        """Send Home Assistant discovery info after grace period (timer callback)."""
+        try:
+            if self._hass is not None:
+                self._hass.send_discovery_info()
+        except Exception as ex:  # defensive
+            _LOGGER.warning("Failed to send HASS discovery info: %s", ex)
+        finally:
+            # clear the timer reference
+            self._hass_birth_timer = None
+
+
+def _convert_code(*, value: int | str, value_items: dict[int, str]) -> str:
     """Convert bms fault code register value."""
     if isinstance(value, int):
         return value_items.get(value, "Unknown")
@@ -388,26 +384,23 @@ def _convert_code(value: int | str, value_items: dict[int, str]) -> str:
     return ", ".join(faults)
 
 
-def _get_equipment_info(value: str) -> str:
+def _get_equipment_info(*, value: str) -> str:
     """Extract the Equipment info from code."""
     upper, lower = value.split(" ")
     return EQUIPMENT.get(int(upper), {}).get(int(lower), "unknown")
 
 
-def _has_bit(val: int, idx: int) -> bool:
+def _has_bit(*, val: int, idx: int) -> bool:
     """Return true if idx bit is set."""
     return (val & (1 << idx)) > 0
 
 
 # ==========================================
 def main() -> None:
-    """Stat mtec mqtt."""
-    global run_status  # noqa: PLW0603  # pylint: disable=global-statement
-    run_status = True
-
-    # Initialization
-    signal.signal(signalnum=signal.SIGTERM, handler=signal_handler)
-    signal.signal(signalnum=signal.SIGINT, handler=signal_handler)
+    """Start mtec mqtt."""
+    # Initialize shutdown manager and register signal handlers
+    shutdown_manager = get_shutdown_manager()
+    shutdown_manager.register_signal_handlers()
 
     coordinator = MtecCoordinator()
     coordinator.run()

@@ -1,4 +1,9 @@
-"""aiomtec2mqtt constants."""
+"""
+aiomtec2mqtt constants.
+
+(c) 2024 by Christian Rödel
+(c) 2026 by SukramJ
+"""
 
 from __future__ import annotations
 
