@@ -165,16 +165,22 @@ aiomtec2mqtt
 
 You can stop the service by pressing CTRL-C or sending a SIGHUB. This will initiate a graceful shutdown. Please be patient - this might take a few seconds.
 
-Starting the service in a shell - as we just did - will not create a permanent running service and is probably only useful for testing. If you want a permanently running service, you need to install a systemd autostart script. The following command does this job:
+Starting the service in a shell - as we just did - will not create a permanent running service and is probably only useful for testing. If you want a permanently running service, you can install a systemd autostart service:
 
 ```
-sudo bin/install_systemd_service.sh
+sudo aiomtec2mqtt-install
 ```
 
-To check if the service is running smoothly, you can execute:
+This will automatically detect your Python environment and create a systemd service. To check if the service is running smoothly:
 
 ```
 sudo systemctl status aiomtec2mqtt
+```
+
+To uninstall the service later:
+
+```
+sudo aiomtec2mqtt-install --uninstall
 ```
 
 ### Advanced configuration
