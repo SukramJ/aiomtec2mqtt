@@ -1,0 +1,202 @@
+binary_sensor.m_tec_energy_butler_grid_injection_limit_switch:
+  friendly_name: Netzeinspeisung Begrenzugsschalter
+switch_sensor.m_tec_energy_butler_grid_injection_limit_switch:
+  friendly_name: Netzeinspeisung Begrenzugsschalter
+binary_sensor.m_tec_energy_butler_off_grid_soc_limit_switch:
+  friendly_name: MrBurns Off-Grid SOC Begrenzugsschalter
+switch.m_tec_energy_butler_off_grid_soc_limit_switch:
+  friendly_name: MrBurns Off-Grid SOC Begrenzugsschalter
+binary_sensor.m_tec_energy_butler_on_grid_soc_limit_switch:
+  friendly_name: MrBurns On-Grid SOC Begrenzugsschalter
+switch.m_tec_energy_butler_on_grid_soc_limit_switch:
+  friendly_name: MrBurns On-Grid SOC Begrenzugsschalter
+sensor.m_tec_energy_butler_backup_current_phase_a:
+  friendly_name: Backup Strom L1
+sensor.m_tec_energy_butler_backup_current_phase_b:
+  friendly_name: Backup Strom L2
+sensor.m_tec_energy_butler_backup_current_phase_c:
+  friendly_name: Backup Strom L3
+sensor.m_tec_energy_butler_backup_energy_day:
+  friendly_name: Backup Energie Tag
+sensor.m_tec_energy_butler_backup_energy_total:
+  friendly_name: Backup Energie Gesamt
+sensor.m_tec_energy_butler_backup_frequency_phase_a:
+  friendly_name: Backup Frequenz L1
+sensor.m_tec_energy_butler_backup_frequency_phase_b:
+  friendly_name: Backup Frequenz L2
+sensor.m_tec_energy_butler_backup_frequency_phase_c:
+  friendly_name: Backup Frequenz L3
+sensor.m_tec_energy_butler_backup_power_phase_a:
+  friendly_name: Backup Leistung L1
+sensor.m_tec_energy_butler_backup_power_phase_b:
+  friendly_name: Backup Leistung L2
+sensor.m_tec_energy_butler_backup_power_phase_c:
+  friendly_name: Backup Leistung L3
+sensor.m_tec_energy_butler_backup_power_total:
+  friendly_name: Backup Energie Gesamt
+sensor.m_tec_energy_butler_backup_voltage_phase_a:
+  friendly_name: Backup Spannung L1
+sensor.m_tec_energy_butler_backup_voltage_phase_b:
+  friendly_name: Backup Spannung L2
+sensor.m_tec_energy_butler_backup_voltage_phase_c:
+  friendly_name: Backup Spannung L3
+sensor.m_tec_energy_butler_battery_cell_temperature_max:
+  friendly_name: MrBurns Batterie Zellentemperatur max
+sensor.m_tec_energy_butler_battery_cell_temperature_min:
+  friendly_name: MrBurns Batterie Zellentemperatur min
+sensor.m_tec_energy_butler_battery_cell_voltage_max:
+  friendly_name: MrBurns Batterie Zellenspannung max
+sensor.m_tec_energy_butler_battery_cell_voltage_min:
+  friendly_name: MrBurns Batterie Zellenspannung min
+sensor.m_tec_energy_butler_battery_charge_energy_day:
+  friendly_name: MrBurns Batterie Ladungsenergie Tag
+sensor.m_tec_energy_butler_battery_current:
+  friendly_name: MrBurns Batterie Strom
+sensor.m_tec_energy_butler_battery_discharge_energy_day:
+  friendly_name: MrBurns Batterie Entladungsenergie Tag
+sensor.m_tec_energy_butler_battery_energy_charged_total:
+  friendly_name: MrBurns Batterie Ladungsenergie Gesamt
+sensor.m_tec_energy_butler_battery_energy_discharged_total:
+  friendly_name: MrBurns Batterie Entladungsenergie Gesamt
+sensor.m_tec_energy_butler_battery_mode:
+  friendly_name: MrBurns Batterie Betriebsmodus
+sensor.m_tec_energy_butler_battery_power:
+  friendly_name: MrBurns Batterie Leistung
+sensor.m_tec_energy_butler_battery_soc:
+  friendly_name: MrBurns Batterie SOC
+sensor.m_tec_energy_butler_battery_soh:
+  friendly_name: MrBurns Batterie SOH
+sensor.m_tec_energy_butler_battery_temperature:
+  friendly_name: MrBurns Batterie Temperatur
+sensor.m_tec_energy_butler_battery_voltage:
+  friendly_name: MrBurns Batterie Spannung
+sensor.m_tec_energy_butler_bms_alarm_code:
+  friendly_name: MrBurns BMS Alarm Meldung
+sensor.m_tec_energy_butler_bms_error_code:
+  friendly_name: MrBurns BMS Fehler Meldung
+sensor.m_tec_energy_butler_bms_protection_code:
+  friendly_name: MrBurns BMS Schutz Meldung
+sensor.m_tec_energy_butler_bms_status:
+  friendly_name: MrBurns BMS Status
+sensor.m_tec_energy_butler_fault_flag1:
+  friendly_name: Fehler Kennzeichen 1
+sensor.m_tec_energy_butler_fault_flag2:
+  friendly_name: Fehler Kennzeichen 2
+sensor.m_tec_energy_butler_grid_energy_injected_total:
+  friendly_name: Netz Energieeinspeisung Gesamt
+sensor.m_tec_energy_butler_grid_energy_injected_total_compensation:
+  friendly_name: Netz Energieeinspeisung Vergütung Gesamt
+sensor.m_tec_energy_butler_grid_energy_purchased_total:
+  friendly_name: Netz Energiebezug Gesamt
+sensor.m_tec_energy_butler_grid_energy_purchased_total_cost:
+  friendly_name: Netz Energiebezug Kosten Gesamt
+sensor.m_tec_energy_butler_grid_frequency:
+  friendly_name: Netz Frequenz
+sensor.m_tec_energy_butler_grid_injection_energy_day:
+  friendly_name: Netz Energieeinspeisung Tag
+sensor.m_tec_energy_butler_grid_injection_power_limit:
+  friendly_name: Netz Einspeisung Leistungsbegrenzung
+number.m_tec_energy_butler_grid_injection_power_limit:
+  friendly_name: Netz Einspeisung Leistungsbegrenzung
+sensor.m_tec_energy_butler_grid_power:
+  friendly_name: Netz Leistung
+sensor.m_tec_energy_butler_grid_power_phase_a:
+  friendly_name: Netz Leistung L1
+sensor.m_tec_energy_butler_grid_power_phase_b:
+  friendly_name: Netz Leistung L2
+sensor.m_tec_energy_butler_grid_power_phase_c:
+  friendly_name: Netz Leistung L3
+sensor.m_tec_energy_butler_grid_purchased_energy_day:
+  friendly_name: Netz Energiebezug Tag
+sensor.m_tec_energy_butler_household_autarky_day:
+  friendly_name: Haushalt Autarkie Tag
+sensor.m_tec_energy_butler_household_autarky_total:
+  friendly_name: Haushalt Autarkie Gesamt
+sensor.m_tec_energy_butler_household_consumption:
+  friendly_name: Haushalt Verbrauch
+sensor.m_tec_energy_butler_household_consumption_day:
+  friendly_name: Haushalt Verbrauch Tag
+sensor.m_tec_energy_butler_household_consumption_total:
+  friendly_name: Haushalt Verbrauch Gesamt
+sensor.m_tec_energy_butler_inverter_ac_current_phase_a:
+  friendly_name: Wechselrichter Strom L1
+sensor.m_tec_energy_butler_inverter_ac_current_phase_b:
+  friendly_name: Wechselrichter Strom L2
+sensor.m_tec_energy_butler_inverter_ac_current_phase_c:
+  friendly_name: Wechselrichter Strom L3
+sensor.m_tec_energy_butler_inverter_ac_power:
+  friendly_name: Wechselrichter Strom
+sensor.m_tec_energy_butler_inverter_ac_voltage_lines_a_b:
+  friendly_name: Wechselrichter Spannung L1 L2
+sensor.m_tec_energy_butler_inverter_ac_voltage_lines_b_c:
+  friendly_name: Wechselrichter Spannung L2 L3
+sensor.m_tec_energy_butler_inverter_ac_voltage_lines_c_a:
+  friendly_name: Wechselrichter Spannung L3 L1
+sensor.m_tec_energy_butler_inverter_ac_voltage_phase_a:
+  friendly_name: Wechselrichter Spannung L1
+sensor.m_tec_energy_butler_inverter_ac_voltage_phase_b:
+  friendly_name: Wechselrichter Spannung L2
+sensor.m_tec_energy_butler_inverter_ac_voltage_phase_c:
+  friendly_name: Wechselrichter Spannung L3
+sensor.m_tec_energy_butler_inverter_operation_mode:
+  friendly_name: Wechselrichter Betriebsmodus
+select.m_tec_energy_butler_inverter_operation_mode:
+  friendly_name: Wechselrichter Betriebsmodus
+sensor.m_tec_energy_butler_inverter_power_phase_a:
+  friendly_name: Wechselrichter Leistung L1
+sensor.m_tec_energy_butler_inverter_power_phase_b:
+  friendly_name: Wechselrichter Leistung L2
+sensor.m_tec_energy_butler_inverter_power_phase_c:
+  friendly_name: Wechselrichter Leistung L3
+sensor.m_tec_energy_butler_inverter_status:
+  friendly_name: Wechselrichter Status
+sensor.m_tec_energy_butler_inverter_temperature_sensor_1:
+  friendly_name: Wechselrichter Temperatursensor 1
+sensor.m_tec_energy_butler_inverter_temperature_sensor_2:
+  friendly_name: Wechselrichter Temperatursensor 2
+sensor.m_tec_energy_butler_inverter_temperature_sensor_3:
+  friendly_name: Wechselrichter Temperatursensor 3
+sensor.m_tec_energy_butler_inverter_temperature_sensor_4:
+  friendly_name: Wechselrichter Temperatursensor 4
+sensor.m_tec_energy_butler_off_grid_soc_limit:
+  friendly_name: MrBurns Off-Grid SoC Begrenzung
+number.m_tec_energy_butler_off_grid_soc_limit:
+  friendly_name: MrBurns Off-Grid SoC Begrenzung
+sensor.m_tec_energy_butler_on_grid_soc_limit:
+  friendly_name: MrBurns On-Grid SOC Begrenzung
+number.m_tec_energy_butler_on_grid_soc_limit:
+  friendly_name: MrBurns On-Grid SOC Begrenzung
+sensor.m_tec_energy_butler_own_consumption_rate_day:
+  friendly_name: Eigenverbrauchsquote Tag
+sensor.m_tec_energy_butler_own_consumption_rate_total:
+  friendly_name: Eigenverbrauchsquote Gesamt
+sensor.m_tec_energy_butler_pv_energy_generated_day:
+  friendly_name: PV Energieerzeugung Tag
+sensor.m_tec_energy_butler_pv_energy_generated_total:
+  friendly_name: PV Energieerzeugung Gesamt
+sensor.m_tec_energy_butler_pv_generation_time_total:
+  friendly_name: PV Energieerzeugungszeit Gesamt
+sensor.m_tec_energy_butler_pv_power:
+  friendly_name: PV Leistung
+sensor.m_tec_energy_butler_pv1_current:
+  friendly_name: PV1 Strom
+sensor.m_tec_energy_butler_pv1_power:
+  friendly_name: PV1 Leistung
+sensor.m_tec_energy_butler_pv1_voltage:
+  friendly_name: PV1 Spannung
+sensor.m_tec_energy_butler_pv2_current:
+  friendly_name: PV2 Strom
+sensor.m_tec_energy_butler_pv2_power:
+  friendly_name: PV2 Leistung
+sensor.m_tec_energy_butler_pv2_voltage:
+  friendly_name: PV2 Spannung
+sensor.klimaenergie_smithers_power:
+  friendly_name: Smithers Leistung
+number.m_tec_energy_butler_charge_limit:
+  friendly_name: Lade limit
+sensor.m_tec_energy_butler_charge_limit:
+  friendly_name: Lade limit
+number.m_tec_energy_butler_discharge_limit:
+  friendly_name: Entlade limit
+sensor.m_tec_energy_butler_discharge_limit:
+  friendly_name: Entlade limit
