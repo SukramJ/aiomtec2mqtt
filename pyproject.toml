@@ -40,10 +40,10 @@ dependencies    = [
 
 [project.scripts]
 aiomtec2mqtt = "aiomtec2mqtt.async_coordinator:main"
+aiomtec2mqtt-install = "aiomtec2mqtt.install:main"
 aiomtec_util = "aiomtec2mqtt.util.mtec_util:main"
 
 [tool.setuptools]
-script-files = ["install_systemd_service.sh"]
 include-package-data = true
 
 [tool.setuptools.dynamic]
@@ -567,6 +567,8 @@ omit = [
     "aiomtec2mqtt/mtec_coordinator.py",
     # Config wizard/user prompts vary per environment; exclude for unit coverage threshold
     "aiomtec2mqtt/config.py",
+    # Systemd install script requires root and system interaction
+    "aiomtec2mqtt/install.py",
 ]
 
 [tool.coverage.report]
@@ -575,6 +577,7 @@ omit = [
     "aiomtec2mqtt/util/__init__.py",
     "aiomtec2mqtt/mtec_coordinator.py",
     "aiomtec2mqtt/config.py",
+    "aiomtec2mqtt/install.py",
 ]
 exclude_lines = [
     # Have to re-enable the standard pragma

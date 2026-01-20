@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ruff check:*)",
+      "Bash(python3 -m ruff check:*)",
+      "Bash(python3:*)"
+    ]
+  }
+}
