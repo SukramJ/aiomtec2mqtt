@@ -27,10 +27,16 @@ import logging
 from typing import Any, Final, cast
 
 from pymodbus.client import AsyncModbusTcpClient
+from pymodbus.framer import FramerType
 from pymodbus.pdu.register_message import ReadHoldingRegistersResponse
 
-from aiomtec2mqtt.const import Config, Register
-from aiomtec2mqtt.exceptions import ModbusConnectionError, ModbusReadError, ModbusTimeoutError
+from aiomtec2mqtt.const import DEFAULT_FRAMER, Config, Register, RegisterGroup
+from aiomtec2mqtt.exceptions import (
+    ModbusConnectionError,
+    ModbusReadError,
+    ModbusTimeoutError,
+    ModbusWriteError,
+)
 from aiomtec2mqtt.health import HealthCheck
 from aiomtec2mqtt.resilience import (
     BackoffConfig,
@@ -66,13 +72,15 @@ class AsyncModbusClient:
 
         """
         self._config = config
-        self._register_map = register_map
-        self._register_groups = register_groups
+        self._register_map: Final = register_map
+        self._register_groups: Final = register_groups
         self._health_check = health_check
 
-        # Connection parameters
+        # Connection parameters (matching sync client)
+        self._modbus_framer: Final[str] = config.get(Config.MODBUS_FRAMER, DEFAULT_FRAMER)
         self._modbus_host: Final[str] = config[Config.MODBUS_IP]
         self._modbus_port: Final[int] = config[Config.MODBUS_PORT]
+        self._modbus_retries: Final[int] = config.get(Config.MODBUS_RETRIES, 3)
         self._modbus_slave: Final[int] = config[Config.MODBUS_SLAVE]
         self._modbus_timeout: Final[int] = config[Config.MODBUS_TIMEOUT]
 
@@ -81,7 +89,17 @@ class AsyncModbusClient:
         self._error_count: int = 0
 
         # Register clustering cache
-        self._cluster_cache: dict[tuple[int, ...], list[dict[str, Any]]] = {}
+        self._cluster_cache: Final[dict[tuple[int, ...], list[dict[str, Any]]]] = {}
+
+        # Precompute frequently used lookups (matching sync client)
+        # Numeric registers used when reading "all" registers
+        self._all_numeric_registers: Final[list[str]] = [r for r in register_map if r.isnumeric()]
+        # Mapping from MQTT name to numeric register string for quick writes
+        self._mqtt_name_to_register: Final[dict[str, str]] = {
+            cast(str, item.get(Register.MQTT)): reg
+            for reg, item in register_map.items()
+            if reg.isnumeric() and item.get(Register.MQTT)
+        }
 
         # Resilience patterns
         self._circuit_breaker: Final = CircuitBreaker(
@@ -117,6 +135,16 @@ class AsyncModbusClient:
         return self._state_machine.state == ConnectionState.CONNECTED
 
     @property
+    def register_groups(self) -> list[str]:
+        """Return the register groups."""
+        return self._register_groups
+
+    @property
+    def register_map(self) -> dict[str, dict[str, Any]]:
+        """Return the register map."""
+        return self._register_map
+
+    @property
     def state(self) -> ConnectionState:
         """Get current connection state."""
         return self._state_machine.state
@@ -140,16 +168,19 @@ class AsyncModbusClient:
 
         self._error_count = 0
         _LOGGER.debug(
-            "Connecting to Modbus server %s:%i",
+            "Connecting to Modbus server %s:%i (framer=%s)",
             self._modbus_host,
             self._modbus_port,
+            self._modbus_framer,
         )
 
         try:
             self._client = AsyncModbusTcpClient(
                 host=self._modbus_host,
                 port=self._modbus_port,
+                framer=FramerType(self._modbus_framer),
                 timeout=self._modbus_timeout,
+                retries=self._modbus_retries,
             )
 
             # Connect with timeout
@@ -228,6 +259,18 @@ class AsyncModbusClient:
                 _LOGGER.warning(error_msg)
                 if self._health_check:
                     self._health_check.record_failure(name="async_modbus", error=error_msg)
+
+    def get_register_list(self, *, group: RegisterGroup) -> list[str]:
+        """Get a list of all registers which belong to a given group."""
+        registers: list[str] = []
+        for register, item in self._register_map.items():
+            if item[Register.GROUP] == group:
+                registers.append(register)
+
+        if len(registers) == 0:
+            _LOGGER.error("Unknown or empty register group: %s", group)
+            return []
+        return registers
 
     async def read_holding_registers(
         self,
@@ -371,6 +414,111 @@ class AsyncModbusClient:
             result.update(cluster_data)
 
         return result
+
+    async def write_register(self, *, register: str, value: Any) -> bool:
+        """
+        Write a value to a register.
+
+        Args:
+            register: Register address as string
+            value: Value to write
+
+        Returns:
+            True if successful, False otherwise
+
+        Raises:
+            ModbusWriteError: On write errors
+
+        """
+        # Check if connected
+        if self._client is None:
+            _LOGGER.error("Can't write register - not connected")
+            return False
+
+        # Lookup register
+        if not (item := self._register_map.get(str(register), None)):
+            _LOGGER.error("Can't write unknown register: %s", register)
+            return False
+        if item.get(Register.WRITABLE, False) is False:
+            _LOGGER.error("Can't write register which is marked read-only: %s", register)
+            return False
+
+        # check value
+        try:
+            if isinstance(value, str):
+                value = float(value) if "." in value else int(value)
+        except Exception:
+            _LOGGER.error("Invalid numeric value: %s", value)
+            return False
+
+        # adjust scale
+        if (item_scale := int(item.get(Register.SCALE, 1))) > 1:
+            value *= item_scale
+
+        try:
+            result = await asyncio.wait_for(
+                self._client.write_register(
+                    address=int(register),
+                    value=int(value),
+                    device_id=self._modbus_slave,
+                ),
+                timeout=self._modbus_timeout,
+            )
+
+            if result.isError():
+                error_msg = f"Error writing register {register} value {value}"
+                _LOGGER.error(error_msg)
+                if self._health_check:
+                    self._health_check.record_failure(name="async_modbus", error=error_msg)
+                raise ModbusWriteError(
+                    message=error_msg,
+                    address=int(register),
+                    slave_id=self._modbus_slave,
+                    details={"value": value},
+                )
+
+        except TimeoutError as ex:
+            error_msg = f"Timeout writing register {register} value {value}"
+            _LOGGER.error(error_msg)
+            if self._health_check:
+                self._health_check.record_failure(name="async_modbus", error=error_msg)
+            raise ModbusWriteError(
+                message=error_msg,
+                address=int(register),
+                slave_id=self._modbus_slave,
+                details={"value": value},
+            ) from ex
+        except ModbusWriteError:
+            # Re-raise our typed exception
+            raise
+        except Exception as ex:
+            error_msg = f"Unexpected error writing register {register}: {ex}"
+            _LOGGER.exception(error_msg)
+            if self._health_check:
+                self._health_check.record_failure(name="async_modbus", error=error_msg)
+            raise ModbusWriteError(
+                message=error_msg,
+                address=int(register),
+                slave_id=self._modbus_slave,
+                details={"value": value},
+            ) from ex
+        else:
+            if self._health_check:
+                self._health_check.record_success(name="async_modbus")
+            return True
+
+    async def write_register_by_name(self, *, name: str, value: Any) -> bool:
+        """Write a value to a register with a given name."""
+        if (register := self._mqtt_name_to_register.get(name)) is None:
+            _LOGGER.error("Can't write unknown register with name: %s", name)
+            return False
+        item = self._register_map[register]
+        if value_items := item.get(Register.VALUE_ITEMS):
+            for value_modbus, value_display in value_items.items():
+                if value_display == value:
+                    value = value_modbus
+                    break
+        return await self.write_register(register=register, value=value)
 
     def _decode_register(
         self,

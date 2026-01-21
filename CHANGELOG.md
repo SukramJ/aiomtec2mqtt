@@ -5,6 +5,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.4] - 2026-01-21
+
+### Added
+
+- **Write Support for Async Coordinator**: Complete writable register support matching sync implementation
+
+  - `write_register()` method in `async_modbus_client.py` with full validation
+  - `write_register_by_name()` method for MQTT key-based writes
+  - `get_register_list()` method to retrieve registers by group
+  - Queue-based async write processing in coordinator
+  - MQTT command topic subscription (`{topic_base}/{mqtt_key}/set`)
+  - Write command handler in `_on_mqtt_message()` for writable entities
+
+- **Modbus Reconnection Logic**: Automatic recovery from connection failures
+
+  - `_modbus_watchdog()` task monitors consecutive read errors
+  - Automatic reconnection after 10 consecutive errors
+  - `_reconnect_modbus()` method for clean disconnect/reconnect cycle
+  - Matches sync coordinator resilience behavior
+
+- **Framer Configuration**: Async Modbus client now supports framer configuration
+
+  - Added `FramerType` support (RTU, Socket) matching sync client
+  - Configurable via `MODBUS_FRAMER` config option
+  - Defaults to `DEFAULT_FRAMER` from const.py
+
+- **Retry Configuration**: Async Modbus client now supports retry configuration
+  - Added `MODBUS_RETRIES` config option with default of 3
+  - Matches sync client retry behavior for reliable communication
+
+### Changed
+
+- **Async/Sync Feature Parity**: Async coordinator now has 100% feature parity with sync
+  - All writable entities work via MQTT command topics
+  - Modbus connection resilience matches sync behavior
+  - Register group utilities available in async client
+
+### Technical Details
+
+- Async coordinator is now fully production-ready and can replace sync coordinator
+- All 350 tests passing
+- mypy type checking passes (strict mode)
+- ruff linting passes
+
+---
+
 ## [1.0.3] - 2026-01-20
 
 ### Fixed
@@ -366,6 +412,7 @@ See `ARCHITECTURE.md` for complete migration guide and roadmap.
 - Systemd service installation script
 - Documentation and examples
 
+[1.0.4]: https://github.com/sukramj/aiomtec2mqtt/compare/v1.0.3..v1.0.4
 [1.0.3]: https://github.com/sukramj/aiomtec2mqtt/compare/v1.0.2..v1.0.3
 [1.0.2]: https://github.com/sukramj/aiomtec2mqtt/compare/v1.0.1..v1.0.2
 [1.0.1]: https://github.com/sukramj/aiomtec2mqtt/compare/v1.0.0..v1.0.1
