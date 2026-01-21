@@ -181,6 +181,10 @@ class AsyncMtecCoordinator:
                             self._process_write_queue(),
                             name="write_queue",
                         )
+                        task_group.create_task(
+                            self._mqtt_watchdog(),
+                            name="mqtt_watchdog",
+                        )
 
                         # Wait for shutdown signal
                         await self._shutdown_event.wait()
@@ -353,6 +357,38 @@ class AsyncMtecCoordinator:
                 raise
             except Exception as ex:
                 _LOGGER.error("Error in Modbus watchdog: %s", ex)
+                await asyncio.sleep(5)
+
+    async def _mqtt_watchdog(self) -> None:
+        """
+        Monitor MQTT connection and reconnect if needed.
+
+        Matches sync paho auto-reconnect behavior with exponential backoff.
+        aiomqtt does not have built-in auto-reconnect, so we implement it here.
+        """
+        _LOGGER.info("Starting MQTT watchdog (check interval: 5s)")
+
+        while not self._shutdown_event.is_set():
+            try:
+                # Check if MQTT is connected
+                if not self._mqtt_client.is_connected:
+                    _LOGGER.warning("MQTT disconnected, attempting reconnect...")
+                    if await self._mqtt_client.reconnect():
+                        _LOGGER.info("MQTT reconnected successfully")
+                        # Re-send HASS discovery if needed
+                        if self._hass and not self._hass_discovery_sent:
+                            await self._send_hass_discovery()
+                    else:
+                        _LOGGER.error("MQTT reconnect failed, will retry...")
+
+                # Check every 5 seconds
+                await asyncio.sleep(5)
+
+            except asyncio.CancelledError:
+                _LOGGER.info("MQTT watchdog cancelled")
+                raise
+            except Exception as ex:
+                _LOGGER.error("Error in MQTT watchdog: %s", ex)
                 await asyncio.sleep(5)
 
     def _on_mqtt_message(self, message: Any) -> None:  # kwonly: disable

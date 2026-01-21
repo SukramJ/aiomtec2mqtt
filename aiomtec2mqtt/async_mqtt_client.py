@@ -286,6 +286,47 @@ class AsyncMqttClient:
             if self._health_check:
                 self._health_check.record_success(name="async_mqtt")
 
+    async def reconnect(self) -> bool:
+        """
+        Reconnect to MQTT broker (matching sync paho auto-reconnect behavior).
+
+        Returns:
+            True if reconnection successful, False otherwise
+
+        """
+        _LOGGER.info("Attempting MQTT reconnection...")
+
+        # Store subscriptions to restore after reconnect
+        topics_to_restore = self._subscribed_topics.copy()
+
+        try:
+            # Disconnect first (cleanup)
+            await self.disconnect()
+
+            # Wait before reconnecting (matching sync: exponential backoff)
+            delay = self._backoff.next_delay()
+            _LOGGER.info("Waiting %.1fs before reconnect attempt", delay)
+            await asyncio.sleep(delay)
+
+            # Reconnect
+            await self.connect()
+
+            # Restore subscriptions
+            for topic in topics_to_restore:
+                try:
+                    await self.subscribe(topic=topic)
+                except Exception as ex:
+                    _LOGGER.warning("Failed to restore subscription to %s: %s", topic, ex)
+
+        except Exception as ex:
+            _LOGGER.error("MQTT reconnection failed: %s", ex)
+            return False
+        else:
+            _LOGGER.info(
+                "MQTT reconnection successful, restored %d subscriptions", len(topics_to_restore)
+            )
+            return True
+
     async def subscribe(self, *, topic: str) -> None:
         """
         Subscribe to MQTT topic.
@@ -362,7 +403,10 @@ class AsyncMqttClient:
             _LOGGER.debug("Message listener cancelled")
             raise
         except Exception as ex:
+            # Mark as disconnected so watchdog can trigger reconnect
+            self._connected = False
+            self._state_machine.transition_to(new_state=ConnectionState.ERROR, error=str(ex))
             error_msg = f"Error in message listener: {ex}"
-            _LOGGER.exception(error_msg)
+            _LOGGER.error(error_msg)
             if self._health_check:
                 self._health_check.record_failure(name="async_mqtt", error=error_msg)
