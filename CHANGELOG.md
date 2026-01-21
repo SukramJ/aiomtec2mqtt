@@ -5,6 +5,71 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.5] - 2026-01-21
+
+### Removed
+
+- **Sync Implementation**: Complete removal of synchronous variant
+  - Removed `modbus_client.py` (sync Modbus client)
+  - Removed `mqtt_client.py` (sync MQTT client)
+  - Removed `mtec_coordinator.py` (sync coordinator)
+  - Removed `test_mqtt_client.py` (sync MQTT tests)
+  - Removed `test_coordinator_helpers.py` (sync coordinator tests)
+  - Removed `fake_paho` test fixture (no longer needed)
+
+### Changed
+
+- **hass_int.py**: Updated to use `MqttClientProtocol` instead of sync `mqtt_client.MqttClient`
+
+  - Added Protocol definition for type-safe MQTT client interface
+  - Supports both sync and async MQTT clients via duck typing
+
+- **mtec_util.py**: Rewritten to use async Modbus client
+
+  - Uses `AsyncModbusClient` instead of `MTECModbusClient`
+  - Wraps async operations with `asyncio.run()` for CLI compatibility
+  - Maintains same interactive menu interface
+
+- **async_modbus_client.py**: Added `read_register()` method
+
+  - Reads a single register with metadata (NAME, VALUE, UNIT)
+  - Used by mtec_util.py for single register queries
+
+- **test_backward_compatibility.py**: Updated to remove sync MQTT client tests
+
+  - Kept Home Assistant discovery tests (using DummyMqtt)
+  - Kept topic format and invariant tests
+
+- **conftest.py**: Removed `fake_paho` fixture
+
+  - No longer needed without sync MQTT client
+
+- **pyproject.toml**: Updated coverage configuration
+  - Removed `mtec_coordinator.py` from omit list
+
+### Technical Details
+
+- All 334 tests passing
+- mypy type checking passes (23 source files)
+- ruff linting passes
+- Full async-only codebase
+
+### Breaking Changes
+
+- Sync coordinator (`mtec_coordinator.py`) is no longer available
+- Sync Modbus client (`modbus_client.py`) is no longer available
+- Sync MQTT client (`mqtt_client.py`) is no longer available
+- Code depending on these modules must migrate to async variants
+
+### Migration Notes
+
+- Use `async_coordinator.py` (or `sync_coordinator_wrapper.py`) instead of `mtec_coordinator.py`
+- Use `async_modbus_client.py` instead of `modbus_client.py`
+- Use `async_mqtt_client.py` instead of `mqtt_client.py`
+- The `sync_coordinator_wrapper.py` provides backward compatibility for sync usage patterns
+
+---
+
 ## [1.0.4] - 2026-01-21
 
 ### Added
@@ -432,6 +497,7 @@ See `ARCHITECTURE.md` for complete migration guide and roadmap.
 - Systemd service installation script
 - Documentation and examples
 
+[1.0.5]: https://github.com/sukramj/aiomtec2mqtt/compare/v1.0.4..v1.0.5
 [1.0.4]: https://github.com/sukramj/aiomtec2mqtt/compare/v1.0.3..v1.0.4
 [1.0.3]: https://github.com/sukramj/aiomtec2mqtt/compare/v1.0.2..v1.0.3
 [1.0.2]: https://github.com/sukramj/aiomtec2mqtt/compare/v1.0.1..v1.0.2

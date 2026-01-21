@@ -14,10 +14,23 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final, Protocol
 
-from aiomtec2mqtt import mqtt_client
 from aiomtec2mqtt.const import HA, MTEC_PREFIX, HAPlatform, Register
+
+if TYPE_CHECKING:
+    pass
+
+
+class MqttClientProtocol(Protocol):
+    """Protocol defining the interface for MQTT clients used by HassIntegration."""
+
+    def publish(self, *, topic: str, payload: str, retain: bool = False) -> None:
+        """Publish a message to MQTT."""
+
+    def subscribe_to_topic(self, *, topic: str) -> None:
+        """Subscribe to an MQTT topic."""
+
 
 _LOGGER: Final = logging.getLogger(__name__)
 
@@ -38,7 +51,7 @@ class HassIntegration:
         self._hass_base_topic: Final = hass_base_topic
         self._mqtt_topic: Final = mqtt_topic
         self._register_map: Final = register_map
-        self._mqtt: mqtt_client.MqttClient | None = None
+        self._mqtt: MqttClientProtocol | None = None
         self._serial_no: str | None = None
         self._is_initialized = False
         # Store: (config_topic, serialized_payload, command_topic_or_none)
@@ -53,7 +66,7 @@ class HassIntegration:
     def initialize(
         self,
         *,
-        mqtt: mqtt_client.MqttClient | None,
+        mqtt: MqttClientProtocol | None,
         serial_no: str,
         firmware_version: str,
         equipment_info: str,
