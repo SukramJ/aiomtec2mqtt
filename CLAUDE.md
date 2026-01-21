@@ -55,7 +55,7 @@ aiomtec2mqtt/
 ### Requirements
 
 - Python 3.13+
-- Dependencies: PyModbus 3.11.1, paho-mqtt, PyYAML, voluptuous
+- Dependencies: PyModbus 3.11+, aiomqtt, PyYAML, pydantic, prometheus-client
 
 ### Installation (Development Mode)
 
