@@ -120,6 +120,7 @@ class AsyncMtecCoordinator:
         self._hass_discovery_sent: bool = False
         self._serial_no: str | None = None
         self._topic_base: str | None = None
+        self._pending_write_queue: asyncio.Queue[tuple[str, str]] = asyncio.Queue()
 
         if self._config[Config.DEBUG]:
             logging.getLogger().setLevel(logging.DEBUG)
@@ -157,8 +158,12 @@ class AsyncMtecCoordinator:
                             name="poll_secondary",
                         )
                         task_group.create_task(
-                            self._poll_statistics(),
-                            name="poll_statistics",
+                            self._poll_day_statistics(),
+                            name="poll_day_statistics",
+                        )
+                        task_group.create_task(
+                            self._poll_total_statistics(),
+                            name="poll_total_statistics",
                         )
                         task_group.create_task(
                             self._poll_static_registers(),
@@ -167,6 +172,14 @@ class AsyncMtecCoordinator:
                         task_group.create_task(
                             self._health_check_loop(),
                             name="health_check",
+                        )
+                        task_group.create_task(
+                            self._modbus_watchdog(),
+                            name="modbus_watchdog",
+                        )
+                        task_group.create_task(
+                            self._process_write_queue(),
+                            name="write_queue",
                         )
 
                         # Wait for shutdown signal
@@ -312,13 +325,62 @@ class AsyncMtecCoordinator:
         else:
             return True
 
+    async def _modbus_watchdog(self) -> None:
+        """
+        Monitor Modbus connection and reconnect if needed.
+
+        Matches sync coordinator behavior: reconnect after 10 consecutive errors.
+        """
+        _LOGGER.info("Starting Modbus watchdog (error threshold: 10)")
+        max_errors = 10
+
+        while not self._shutdown_event.is_set():
+            try:
+                # Check error count
+                if self._modbus_client.error_count > max_errors:
+                    _LOGGER.warning(
+                        "Modbus error count (%d) exceeded threshold (%d), reconnecting...",
+                        self._modbus_client.error_count,
+                        max_errors,
+                    )
+                    await self._reconnect_modbus()
+
+                # Check every 5 seconds
+                await asyncio.sleep(5)
+
+            except asyncio.CancelledError:
+                _LOGGER.info("Modbus watchdog cancelled")
+                raise
+            except Exception as ex:
+                _LOGGER.error("Error in Modbus watchdog: %s", ex)
+                await asyncio.sleep(5)
+
     def _on_mqtt_message(self, message: Any) -> None:  # kwonly: disable
         """Handle incoming MQTT messages."""
+        topic = str(message.topic)
+        payload = message.payload.decode(UTF8) if message.payload else ""
+
         # Handle HASS birth message
-        if message.topic == self._hass_status_topic and message.payload.decode(UTF8) == "online":
+        if topic == self._hass_status_topic and payload == "online":
             _LOGGER.info("Home Assistant came online")
             # Trigger discovery resend
             self._hass_discovery_sent = False
+            return
+
+        # Handle command topics for writable registers
+        # Expected format: {topic_base}/{group}/{mqtt_key}/set
+        if self._topic_base and topic.startswith(self._topic_base) and topic.endswith("/set"):
+            # Extract mqtt_key from topic
+            # Topic: MTEC/serial/group/mqtt_key/set
+            parts = topic.split("/")
+            if len(parts) >= 4:
+                mqtt_key = parts[-2]  # The part before /set
+                _LOGGER.info("Received write command for %s: %s", mqtt_key, payload)
+                # Queue the write request for async processing
+                try:
+                    self._pending_write_queue.put_nowait((mqtt_key, payload))
+                except asyncio.QueueFull:
+                    _LOGGER.error("Write queue full, dropping command for %s", mqtt_key)
 
     async def _poll_base_registers(self) -> None:
         """Poll BASE register group continuously."""
@@ -378,6 +440,34 @@ class AsyncMtecCoordinator:
             except Exception as ex:
                 _LOGGER.error("Error in CONFIG polling: %s", ex)
                 await asyncio.sleep(self._mqtt_refresh_config)
+
+    async def _poll_day_statistics(self) -> None:
+        """Poll DAY statistics periodically (matching sync: separate from TOTAL)."""
+        _LOGGER.info("Starting DAY statistics polling (interval: %ds)", self._mqtt_refresh_day)
+
+        # Wait for initialization (poll until topic_base is set)
+        while not self._shutdown_event.is_set() and self._topic_base is None:  # noqa: ASYNC110
+            await asyncio.sleep(1)
+
+        while not self._shutdown_event.is_set():
+            try:
+                # Read DAY statistics
+                day_data = await self._modbus_client.read_register_group(
+                    group_name=RegisterGroup.DAY
+                )
+                if day_data:
+                    await self._publish_register_data(data=day_data, group=RegisterGroup.DAY)
+                    _LOGGER.debug("Published DAY statistics")
+
+                # Wait for next poll
+                await asyncio.sleep(self._mqtt_refresh_day)
+
+            except asyncio.CancelledError:
+                _LOGGER.info("DAY statistics polling task cancelled")
+                raise
+            except Exception as ex:
+                _LOGGER.error("Error in DAY statistics polling: %s", ex)
+                await asyncio.sleep(self._mqtt_refresh_day)
 
     async def _poll_secondary_registers(self) -> None:
         """Poll secondary register groups (GRID, INVERTER, etc.) in round-robin."""
@@ -450,9 +540,9 @@ class AsyncMtecCoordinator:
                 _LOGGER.error("Error in STATIC polling: %s", ex)
                 await asyncio.sleep(self._mqtt_refresh_static)
 
-    async def _poll_statistics(self) -> None:
-        """Poll DAY and TOTAL statistics periodically."""
-        _LOGGER.info("Starting statistics polling (interval: %ds)", self._mqtt_refresh_day)
+    async def _poll_total_statistics(self) -> None:
+        """Poll TOTAL statistics periodically (matching sync: separate from DAY)."""
+        _LOGGER.info("Starting TOTAL statistics polling (interval: %ds)", self._mqtt_refresh_total)
 
         # Wait for initialization (poll until topic_base is set)
         while not self._shutdown_event.is_set() and self._topic_base is None:  # noqa: ASYNC110
@@ -460,14 +550,6 @@ class AsyncMtecCoordinator:
 
         while not self._shutdown_event.is_set():
             try:
-                # Read DAY statistics
-                day_data = await self._modbus_client.read_register_group(
-                    group_name=RegisterGroup.DAY
-                )
-                if day_data:
-                    await self._publish_register_data(data=day_data, group=RegisterGroup.DAY)
-                    _LOGGER.debug("Published DAY statistics")
-
                 # Read TOTAL statistics
                 total_data = await self._modbus_client.read_register_group(
                     group_name=RegisterGroup.TOTAL
@@ -477,14 +559,14 @@ class AsyncMtecCoordinator:
                     _LOGGER.debug("Published TOTAL statistics")
 
                 # Wait for next poll
-                await asyncio.sleep(self._mqtt_refresh_day)
+                await asyncio.sleep(self._mqtt_refresh_total)
 
             except asyncio.CancelledError:
-                _LOGGER.info("Statistics polling task cancelled")
+                _LOGGER.info("TOTAL statistics polling task cancelled")
                 raise
             except Exception as ex:
-                _LOGGER.error("Error in statistics polling: %s", ex)
-                await asyncio.sleep(self._mqtt_refresh_day)
+                _LOGGER.error("Error in TOTAL statistics polling: %s", ex)
+                await asyncio.sleep(self._mqtt_refresh_total)
 
     def _process_register_value(
         self, *, register_addr: str, value: Any, reg_info: dict[str, Any]
@@ -524,6 +606,42 @@ class AsyncMtecCoordinator:
             return self._convert_code(value=value, value_items=value_items)
 
         return value
+
+    async def _process_write_queue(self) -> None:
+        """Process write requests from the queue."""
+        _LOGGER.info("Starting write queue processor")
+
+        while not self._shutdown_event.is_set():
+            try:
+                # Wait for a write request (with timeout to check shutdown)
+                try:
+                    mqtt_key, value = await asyncio.wait_for(
+                        self._pending_write_queue.get(),
+                        timeout=1.0,
+                    )
+                except TimeoutError:
+                    continue
+
+                # Process the write request
+                _LOGGER.debug("Processing write request: %s = %s", mqtt_key, value)
+                try:
+                    success = await self._modbus_client.write_register_by_name(
+                        name=mqtt_key, value=value
+                    )
+                    if success:
+                        _LOGGER.info("Successfully wrote %s = %s", mqtt_key, value)
+                    else:
+                        _LOGGER.error("Failed to write %s = %s", mqtt_key, value)
+                except Exception as ex:
+                    _LOGGER.error("Error writing %s = %s: %s", mqtt_key, value, ex)
+
+                self._pending_write_queue.task_done()
+
+            except asyncio.CancelledError:
+                _LOGGER.info("Write queue processor cancelled")
+                raise
+            except Exception as ex:
+                _LOGGER.error("Error in write queue processor: %s", ex)
 
     async def _publish_pseudo_registers(
         self,
@@ -615,9 +733,9 @@ class AsyncMtecCoordinator:
 
         # Publish pseudo-registers
         for mqtt_key, value in pseudo_values.items():
-            # Correct negative values
-            if isinstance(value, float) and value < 0:
-                value = 0.0
+            # Correct negative values (matching sync: both int and float)
+            if isinstance(value, (int, float)) and value < 0:
+                value = 0
 
             topic = f"{base}/{mqtt_key}/state"
             payload = self._format_value(value=value)
@@ -681,6 +799,26 @@ class AsyncMtecCoordinator:
             processed_data=processed_data, raw_data=data, group=group
         )
 
+    async def _reconnect_modbus(self) -> None:
+        """Reconnect to Modbus server (matching sync coordinator behavior)."""
+        _LOGGER.info("Attempting Modbus reconnection...")
+
+        try:
+            # Disconnect first
+            await self._modbus_client.disconnect()
+
+            # Wait before reconnecting (matching sync: 10 seconds)
+            await asyncio.sleep(10)
+
+            # Reconnect
+            if await self._modbus_client.connect():
+                _LOGGER.info("Modbus reconnection successful")
+            else:
+                _LOGGER.error("Modbus reconnection failed")
+
+        except Exception as ex:
+            _LOGGER.error("Error during Modbus reconnection: %s", ex)
+
     async def _send_hass_discovery(self) -> None:
         """Send Home Assistant discovery messages."""
         if not self._hass:
@@ -694,11 +832,25 @@ class AsyncMtecCoordinator:
         _LOGGER.info("Sending Home Assistant discovery messages")
 
         try:
-            # Publish discovery messages from _devices_array
-            for topic, payload_str, _command_topic in self._hass._devices_array:  # noqa: SLF001 # pylint: disable=protected-access
+            # Publish discovery messages and subscribe to command topics
+            command_topics_subscribed = 0
+            for topic, payload_str, command_topic in self._hass._devices_array:  # noqa: SLF001 # pylint: disable=protected-access
                 await self._mqtt_client.publish(topic=topic, payload=payload_str, retain=True)
 
-            _LOGGER.info("Sent %d discovery messages", len(self._hass._devices_array))  # pylint: disable=protected-access
+                # Subscribe to command topic for writable entities (matching sync behavior)
+                if command_topic:
+                    try:
+                        await self._mqtt_client.subscribe(topic=command_topic)
+                        command_topics_subscribed += 1
+                        _LOGGER.debug("Subscribed to command topic: %s", command_topic)
+                    except Exception as ex:
+                        _LOGGER.warning("Failed to subscribe to %s: %s", command_topic, ex)
+
+            _LOGGER.info(
+                "Sent %d discovery messages, subscribed to %d command topics",
+                len(self._hass._devices_array),  # pylint: disable=protected-access
+                command_topics_subscribed,
+            )
             self._hass_discovery_sent = True
 
         except Exception as ex:
