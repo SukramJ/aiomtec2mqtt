@@ -23,7 +23,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `_modbus_watchdog()` task monitors consecutive read errors
   - Automatic reconnection after 10 consecutive errors
   - `_reconnect_modbus()` method for clean disconnect/reconnect cycle
-  - Matches sync coordinator resilience behavior
+  - 10-second wait before reconnect (matching sync behavior)
+
+- **MQTT Reconnection Logic**: Automatic recovery from broker disconnects
+
+  - `_mqtt_watchdog()` task monitors connection status every 5 seconds
+  - `reconnect()` method in `async_mqtt_client.py` with exponential backoff
+  - Automatic subscription restoration after reconnect
+  - Re-sends Home Assistant discovery after reconnect
+  - Matches sync paho-mqtt auto-reconnect behavior
 
 - **Framer Configuration**: Async Modbus client now supports framer configuration
 
@@ -35,11 +43,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added `MODBUS_RETRIES` config option with default of 3
   - Matches sync client retry behavior for reliable communication
 
+### Fixed
+
+- **Negative Value Correction**: Fixed pseudo-register correction to handle both `int` and `float` types
+
+  - Changed `isinstance(value, float)` to `isinstance(value, (int, float))` matching sync behavior
+  - Ensures consumption and rate calculations are never negative
+
+- **TOTAL Polling Interval**: Separated DAY and TOTAL statistics polling
+  - Split `_poll_statistics()` into `_poll_day_statistics()` and `_poll_total_statistics()`
+  - DAY uses `_mqtt_refresh_day` interval, TOTAL uses `_mqtt_refresh_total` interval
+  - Matches sync coordinator behavior with independent polling timers
+
 ### Changed
 
 - **Async/Sync Feature Parity**: Async coordinator now has 100% feature parity with sync
   - All writable entities work via MQTT command topics
-  - Modbus connection resilience matches sync behavior
+  - Modbus and MQTT connection resilience matches sync behavior
   - Register group utilities available in async client
 
 ### Technical Details
