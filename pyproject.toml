@@ -564,7 +564,6 @@ omit = [
     # Long-running runtime/integration entry points and interactive CLI utilities are excluded from unit-test coverage
     "aiomtec2mqtt/util/mtec_util.py",
     "aiomtec2mqtt/util/__init__.py",
-    "aiomtec2mqtt/mtec_coordinator.py",
     # Config wizard/user prompts vary per environment; exclude for unit coverage threshold
     "aiomtec2mqtt/config.py",
     # Systemd install script requires root and system interaction
@@ -575,7 +574,6 @@ omit = [
 omit = [
     "aiomtec2mqtt/util/mtec_util.py",
     "aiomtec2mqtt/util/__init__.py",
-    "aiomtec2mqtt/mtec_coordinator.py",
     "aiomtec2mqtt/config.py",
     "aiomtec2mqtt/install.py",
 ]

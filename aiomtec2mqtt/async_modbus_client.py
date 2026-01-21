@@ -365,6 +365,44 @@ class AsyncModbusClient:
                 self._health_check.record_success(name="async_modbus")
             return result
 
+    async def read_register(
+        self,
+        *,
+        register: str,
+    ) -> dict[str, Any] | None:
+        """
+        Read a single register and return its value with metadata.
+
+        Args:
+            register: Register address as string
+
+        Returns:
+            Dictionary with NAME, VALUE, UNIT keys or None if not found/error
+
+        """
+        # Lookup register
+        if not (item := self._register_map.get(str(register))):
+            _LOGGER.error("Unknown register: %s", register)
+            return None
+
+        # Read as a cluster of one
+        if not (clusters := self._get_register_clusters(registers=[register])):
+            return None
+
+        try:
+            if (cluster_data := await self._read_cluster(cluster=clusters[0])) and (
+                reg_name := item.get(Register.NAME, register)
+            ) in cluster_data:
+                return {
+                    Register.NAME: reg_name,
+                    Register.VALUE: cluster_data[reg_name],
+                    Register.UNIT: item.get(Register.UNIT, ""),
+                }
+        except Exception as ex:
+            _LOGGER.error("Failed to read register %s: %s", register, ex)
+
+        return None
+
     async def read_register_group(
         self,
         *,

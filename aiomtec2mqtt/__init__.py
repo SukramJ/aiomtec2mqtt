@@ -7,5 +7,5 @@ Modbus, optional Home Assistant discovery integration, and small utilities.
 
 from __future__ import annotations
 
-__all__ = ["config", "mqtt_client", "hass_int", "modbus_client"]
-__version__ = "1.0.4"
+__all__ = ["config", "hass_int"]
+__version__ = "1.0.5"
