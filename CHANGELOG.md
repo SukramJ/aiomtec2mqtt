@@ -10,12 +10,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 - **Sync Implementation**: Complete removal of synchronous variant
+
   - Removed `modbus_client.py` (sync Modbus client)
   - Removed `mqtt_client.py` (sync MQTT client)
   - Removed `mtec_coordinator.py` (sync coordinator)
   - Removed `test_mqtt_client.py` (sync MQTT tests)
   - Removed `test_coordinator_helpers.py` (sync coordinator tests)
   - Removed `fake_paho` test fixture (no longer needed)
+
+- **Unused Dependencies**: Cleaned up dependencies after sync removal
+  - Removed `paho-mqtt` (now only indirect dependency of aiomqtt)
+  - Removed `python-slugify` (never used)
+  - Removed `voluptuous` (never used)
+  - Added `prometheus-client` to explicit dependencies (was missing)
 
 ### Changed
 

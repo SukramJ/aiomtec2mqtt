@@ -12,7 +12,8 @@
       "Bash(pre-commit run:*)",
       "Bash(prek:*)",
       "Bash(git add:*)",
-      "Bash(python -m mypy:*)"
+      "Bash(python -m mypy:*)",
+      "Bash(pip show:*)"
     ]
   }
 }

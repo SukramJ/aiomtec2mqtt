@@ -25,11 +25,9 @@ requires-python = ">=3.13.0"
 dependencies    = [
     "pyyaml>=6.0.2",
     "PyModbus>=3.11.4",
-    "paho-mqtt>=2.1.0",
     "aiomqtt>=2.5.0",
-    "python-slugify>=8.0.4",
-    "voluptuous>=0.15.2",
     "pydantic>=2.12.0",
+    "prometheus-client>=0.21.0",
 ]
 
 [project.urls]
@@ -550,7 +548,7 @@ voluptuous = "vol"
 force-sort-within-sections = true
 required-imports = ["from __future__ import annotations"]
 known-first-party = ["aiomtec2mqtt",]
-known-third-party = ["paho", "pymodbus", "orjson", "voluptuous",]
+known-third-party = ["pymodbus", "aiomqtt", "pydantic", "prometheus_client", "orjson",]
 combine-as-imports = true
 split-on-trailing-comma = false
 

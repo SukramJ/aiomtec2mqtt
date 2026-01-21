@@ -31,7 +31,6 @@ known-third-party = [
     "orjson",
     "syrupy",
     "pytest",
-    "voluptuous",
     "pylint",
 ]
 forced-separate = [
