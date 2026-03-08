@@ -13,6 +13,14 @@
 - Works locally without internet connection
 - Optimized register scanning to reduce Modbus traffic
 
+## Coding Workflow Rules
+
+1. **Plan first, code second**: Before writing any code, describe your approach and wait for approval.
+2. **Clarify ambiguity**: If requirements are ambiguous, ask clarifying questions before writing any code.
+3. **Suggest tests after coding**: After finishing any code change, list edge cases and suggest test cases to cover them.
+4. **Bug fix = test first**: When fixing a bug, start by writing a test that reproduces it, then fix it until the test passes.
+5. **Learn from corrections**: Every time I correct you, reflect on what you did wrong and come up with a plan to never make the same mistake again. Update your memory files accordingly.
+
 ## Architecture
 
 ### Data Flow
