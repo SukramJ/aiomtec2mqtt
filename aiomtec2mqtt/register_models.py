@@ -10,13 +10,13 @@ registers, and Home Assistant configurations using Pydantic v2.
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
 
-class RegisterDataType(str, Enum):
+class RegisterDataType(StrEnum):
     """Register data types."""
 
     INT16 = "int16"
@@ -27,7 +27,7 @@ class RegisterDataType(str, Enum):
     STRING = "string"
 
 
-class RegisterGroup(str, Enum):
+class RegisterGroup(StrEnum):
     """Register groups for polling intervals."""
 
     BASE = "BASE"
@@ -43,7 +43,7 @@ class RegisterGroup(str, Enum):
     CONFIG = "CONFIG"
 
 
-class HassDeviceClass(str, Enum):
+class HassDeviceClass(StrEnum):
     """Home Assistant device classes."""
 
     POWER = "power"
@@ -56,7 +56,7 @@ class HassDeviceClass(str, Enum):
     POWER_FACTOR = "power_factor"
 
 
-class HassStateClass(str, Enum):
+class HassStateClass(StrEnum):
     """Home Assistant state classes."""
 
     MEASUREMENT = "measurement"
