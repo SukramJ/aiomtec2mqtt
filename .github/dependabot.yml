@@ -3,9 +3,36 @@ updates:
   - package-ecosystem: pip
     directory: "/"
     schedule:
-      interval: monthly
+      interval: weekly
     open-pull-requests-limit: 15
+    groups:
+      test-dependencies:
+        patterns:
+          - "pytest*"
+          - "coverage*"
+          - "freezegun"
+          - "mypy"
+          - "pylint*"
+          - "types-*"
+      prod-dependencies:
+        patterns:
+          - "pyyaml"
+          - "PyModbus"
+          - "aiomqtt"
+          - "pydantic*"
+          - "prometheus-client"
+      tooling:
+        patterns:
+          - "uv"
+          - "prek"
+          - "setuptools"
+          - "pip"
+          - "pur"
   - package-ecosystem: "github-actions"
     directory: "/"
     schedule:
-      interval: monthly
+      interval: weekly
+    groups:
+      github-actions:
+        patterns:
+          - "*"

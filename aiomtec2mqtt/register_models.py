@@ -15,6 +15,17 @@ from typing import Any
 
 from pydantic import BaseModel, Field, field_validator
 
+__all__ = [
+    "CalculatedRegister",
+    "HassConfig",
+    "HassDeviceClass",
+    "HassStateClass",
+    "RegisterDataType",
+    "RegisterDefinition",
+    "RegisterGroup",
+    "RegisterMap",
+]
+
 
 class RegisterDataType(StrEnum):
     """Register data types."""

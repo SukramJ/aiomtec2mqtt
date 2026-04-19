@@ -26,6 +26,8 @@ from prometheus_client import (
 if TYPE_CHECKING:
     from collections.abc import Iterator
 
+__all__ = ["PrometheusMetrics"]
+
 _LOGGER: Final = logging.getLogger(__name__)
 
 # Metric constants

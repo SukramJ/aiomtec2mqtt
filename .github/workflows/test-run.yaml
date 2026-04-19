@@ -7,10 +7,25 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
+        os: ["ubuntu-latest", "macos-latest"]
         python-version: ["3.13", "3.14"]
+        experimental: [false]
+        include:
+          # Free-threaded build only validated on Linux for now
+          - os: "ubuntu-latest"
+            python-version: "3.14t"
+            experimental: true
+          # ARM64 validation: Raspberry Pi 4+ and current Synology NAS units
+          # all run arm64. Pin to the production Python (3.13) to keep CI
+          # time bounded — if it works here, it works on the Pi.
+          - os: "ubuntu-24.04-arm"
+            python-version: "3.13"
+            experimental: false
+    continue-on-error: ${{ matrix.experimental }}
     steps:
       - name: Set Timezone
         uses: szenius/set-timezone@v2.0
@@ -28,6 +43,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements_test.txt
       - name: Run tests and collect coverage
-        run: pytest --cov=aiomtec2mqtt tests --asyncio-mode=auto
+        run: pytest --cov=aiomtec2mqtt --cov-report=xml tests --asyncio-mode=auto
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v6
+        with:
+          fail_ci_if_error: ${{ !matrix.experimental }}
+          files: ./coverage.xml

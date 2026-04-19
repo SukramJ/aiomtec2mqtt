@@ -22,12 +22,21 @@ classifiers = [
     "Topic :: Home Automation",
 ]
 requires-python = ">=3.13.0"
+# Upper bounds guard against major-version breaks (PyModbus 2→3, aiomqtt 1→2,
+# and pydantic 1→2 were all breaking). Bump deliberately after validation.
 dependencies    = [
-    "pyyaml>=6.0.2",
-    "PyModbus>=3.11.4",
-    "aiomqtt>=2.5.0",
-    "pydantic>=2.12.0",
-    "prometheus-client>=0.21.0",
+    "pyyaml>=6.0.2,<7",
+    "PyModbus>=3.11.4,<4",
+    "aiomqtt>=2.5.0,<3",
+    "pydantic>=2.12.0,<3",
+    "prometheus-client>=0.21.0,<1",
+]
+
+[project.optional-dependencies]
+# `fast` installs optional C-accelerated libraries for hot paths. The package
+# transparently falls back to the stdlib equivalents when they are missing.
+fast = [
+    "orjson>=3.10.0,<4",
 ]
 
 [project.urls]
@@ -49,7 +58,7 @@ version = {attr = "aiomtec2mqtt.__version__"}
 
 [tool.setuptools.packages.find]
 include = ["aiomtec2mqtt*"]
-exclude = ["tests", "tests.*", "dist", "build"]
+exclude = ["tests", "tests.*", "dist", "build", "test_support*", "aiomtec2mqtt_test_support*"]
 
 [tool.setuptools.package-data]
 aiomtec2mqtt = ["py.typed", "*.yaml"]
@@ -388,7 +397,44 @@ runtime-typing = false
 [tool.pylint.CODE_STYLE]
 max-line-length-suggestions = 99
 
+[tool.mypy]
+python_version = "3.13"
+platform = "linux"
+plugins = ["pydantic.mypy"]
+show_error_codes = true
+follow_imports = "normal"
+local_partial_types = true
+strict_equality = true
+no_implicit_optional = true
+warn_incomplete_stub = true
+warn_redundant_casts = true
+warn_unused_configs = true
+warn_unused_ignores = true
+enable_error_code = ["ignore-without-code", "redundant-self", "truthy-iterable"]
+disable_error_code = ["annotation-unchecked", "import-not-found", "import-untyped"]
+extra_checks = false
+check_untyped_defs = true
+disallow_incomplete_defs = true
+disallow_subclassing_any = true
+disallow_untyped_calls = true
+disallow_untyped_decorators = true
+disallow_untyped_defs = true
+warn_return_any = true
+warn_unreachable = true
+
+[[tool.mypy.overrides]]
+module = "aiomtec2mqtt.*"
+check_untyped_defs = true
+disallow_incomplete_defs = true
+disallow_subclassing_any = true
+disallow_untyped_calls = true
+disallow_untyped_decorators = true
+disallow_untyped_defs = true
+warn_return_any = true
+warn_unreachable = true
+
 [tool.pytest.ini_options]
+addopts = "-n auto --dist loadscope -m 'not benchmark'"
 pythonpath = [
     ".",
     "aiomtec2mqtt",
@@ -404,6 +450,11 @@ log_format = "%(asctime)s.%(msecs)03d %(levelname)-8s %(threadName)s %(name)s:%(
 log_date_format = "%Y-%m-%d %H:%M:%S"
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "benchmark: performance benchmark tests",
+    "integration: tests that exercise external systems or long paths",
+]
 
 filterwarnings = []
 
@@ -535,6 +586,9 @@ lint.ignore = [
     "PYI041"
 ]
 
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
 [tool.ruff.lint.flake8-pytest-style]
 fixture-parentheses = false
 
@@ -543,6 +597,8 @@ voluptuous = "vol"
 
 [tool.ruff.lint.per-file-ignores]
 "script/*" = ["T20"]
+"tests/*" = ["D100", "D101", "D102", "D103", "D104", "PLR2004", "S101", "SLF001"]
+"test_support/tests/*" = ["D100", "D101", "D102", "D103", "D104", "INP001", "PLC0415", "PLR2004", "S101"]
 
 [tool.ruff.lint.isort]
 force-sort-within-sections = true
@@ -557,6 +613,7 @@ max-complexity = 25
 
 
 [tool.coverage.run]
+branch = true
 source = ["aiomtec2mqtt",]
 omit = [
     # Long-running runtime/integration entry points and interactive CLI utilities are excluded from unit-test coverage
@@ -566,14 +623,24 @@ omit = [
     "aiomtec2mqtt/config.py",
     # Systemd install script requires root and system interaction
     "aiomtec2mqtt/install.py",
+    # Test fakes / helpers: shipped as a public test utility, exercised indirectly
+    "aiomtec2mqtt/testing.py",
+    # Deprecated sync wrapper: slated for removal (see ROADMAP 1.1)
+    "aiomtec2mqtt/sync_coordinator_wrapper.py",
 ]
 
 [tool.coverage.report]
+# NOTE: Threshold reflects target state. Current gap is tracked in ROADMAP 3.9
+# (double test count). Lower only as a last resort — add tests first.
+fail_under = 85
+show_missing = true
 omit = [
     "aiomtec2mqtt/util/mtec_util.py",
     "aiomtec2mqtt/util/__init__.py",
     "aiomtec2mqtt/config.py",
     "aiomtec2mqtt/install.py",
+    "aiomtec2mqtt/testing.py",
+    "aiomtec2mqtt/sync_coordinator_wrapper.py",
 ]
 exclude_lines = [
     # Have to re-enable the standard pragma
@@ -586,4 +653,6 @@ exclude_lines = [
     # TYPE_CHECKING and @overload blocks are never executed during pytest run
     "if TYPE_CHECKING:",
     "@overload",
+    # Protocol method bodies are structural stubs, never executed
+    "^\\s*\\.\\.\\.\\s*$",
 ]

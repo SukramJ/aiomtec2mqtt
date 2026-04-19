@@ -1,14 +1,16 @@
 repos:
   - repo: local
     hooks:
+      # Stdlib-only helper; uses the shebang (`#!/usr/bin/env python3`) so it
+      # runs without an activated project venv.
       - id: sort-class-members
         name: sort-class-members
-        entry: script/run-in-env.sh python script/sort_class_members.py
+        entry: script/sort_class_members.py
         language: script
         types_or: [python]
         files: ^(aiomtec2mqtt|tests)/.+\.py$
   - repo: https://github.com/charliermarsh/ruff-pre-commit
-    rev: v0.15.8
+    rev: v0.15.11
     hooks:
       - id: ruff
         args:
@@ -24,7 +26,7 @@ repos:
           - --skip="./.*,*.csv,*.json"
           - --quiet-level=2
         exclude_types: [csv, json]
-        exclude: ^tests/fixtures/|templates/customize.yaml|^(BASELINE|PHASE0_SUMMARY|ARCHITECTURE)\.md$
+        exclude: ^tests/fixtures/|templates/customize.yaml|^(BASELINE|PHASE0_SUMMARY)\.md$
   - repo: https://github.com/PyCQA/bandit
     rev: 1.9.4
     hooks:
@@ -34,6 +36,10 @@ repos:
           - --format=custom
           - --configfile=tests/bandit.yaml
         files: ^(aiomtec2mqtt|script|tests)/.+\.py$
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.2
+    hooks:
+      - id: gitleaks
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v4.4.0
     hooks:
@@ -63,16 +69,17 @@ repos:
       - id: python-typing-update
         stages: [manual]
         args:
-          - --py311-plus
+          - --py313-plus
           - --force
           - --keep-updates
         files: ^(aiomtec2mqtt|tests|script)/.+\.py$
   - repo: local
     hooks:
-      # Run mypy through our wrapper script in order to get the possible
-      # pyenv and/or virtualenv activated; it may not have been e.g. if
-      # committing from a GUI tool that was not launched from an activated
-      # shell.
+      # mypy/pylint need access to all project imports (Pydantic, pymodbus,
+      # etc.), so they must run inside the project venv. The wrapper
+      # activates `.venv/` (or `venv/`) before exec'ing the tool, which
+      # works whether prek itself is invoked from an activated shell or
+      # from a Git pre-commit hook.
       - id: mypy
         name: mypy
         entry: script/run-in-env.sh mypy
@@ -86,9 +93,11 @@ repos:
         language: script
         types: [python]
         files: ^(aiomtec2mqtt)/.+\.py$
+      # Stdlib-only helper; uses the shebang so it runs without an
+      # activated project venv (unlike mypy/pylint above).
       - id: kwonly-lint
         name: kwonly-lint
-        entry: script/run-in-env.sh python script/lint_kwonly.py aiomtec2mqtt
+        entry: script/lint_kwonly.py aiomtec2mqtt
         language: script
         types_or: [python, pyi]
         files: ^(aiomtec2mqtt)/.+\.py$

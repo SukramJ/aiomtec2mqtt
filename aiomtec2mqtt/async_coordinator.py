@@ -39,6 +39,8 @@ from aiomtec2mqtt.const import (
 )
 from aiomtec2mqtt.health import HealthCheck
 
+__all__ = ["AsyncMtecCoordinator", "main"]
+
 _LOGGER: Final = logging.getLogger(__name__)
 
 PVDATA_TYPE = dict[str, dict[str, Any] | int | float | str | bool]

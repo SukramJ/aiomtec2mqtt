@@ -1,4 +1,4 @@
-name: Pre-commit checks
+name: prek checks
 
 # yamllint disable-line rule:truthy
 on:
@@ -17,8 +17,8 @@ permissions:
   contents: read
 
 jobs:
-  pre-commit:
-    name: Run pre-commit hooks
+  prek:
+    name: Run prek hooks
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -34,7 +34,5 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements_test.txt
 
-      - name: Run pre-commit
-        uses: pre-commit/action@v3.0.1
-        with:
-          extra_args: --all-files
+      - name: Run prek
+        run: prek run --all-files --show-diff-on-failure

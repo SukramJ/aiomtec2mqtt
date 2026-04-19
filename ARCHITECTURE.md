@@ -1,44 +1,44 @@
-# aiomtec2mqtt - Architektur-Analyse & Modernisierungsplan
+# aiomtec2mqtt — Architecture Analysis & Modernization Plan
 
 **Version:** 1.0
-**Datum:** 2026-01-20
-**Status:** Draft für Diskussion
+**Date:** 2026-01-20
+**Status:** Draft for discussion
 
 ---
 
 ## Executive Summary
 
-Das `aiomtec2mqtt` Projekt ist eine Python 3.13-Anwendung zur Anbindung von M-TEC Energybutler Wechselrichtern an MQTT-Broker. Die aktuelle Implementierung (v2.0.5) ist **vollständig synchron** und weist erhebliche architektonische Schwächen auf, die zu Stabilitätsproblemen in Produktionsumgebungen führen können.
+The `aiomtec2mqtt` project is a Python 3.13 application that connects M-TEC Energybutler inverters to MQTT brokers. The current implementation (v2.0.5) is **fully synchronous** and has significant architectural weaknesses that can lead to stability issues in production environments.
 
-**Kritische Befunde:**
+**Critical findings:**
 
-- ❌ **Komplett synchrone Architektur** trotz Projektname "aio" (asyncio)
-- ❌ **Keine Resilience-Patterns** (Circuit Breaker, Exponential Backoff, Retry)
-- ❌ **Globaler State für Signal-Handling** (Anti-Pattern)
-- ❌ **Fehlende Error Recovery** mit sinnvoller Backoff-Strategie
-- ❌ **Keine Event-getriebene Architektur**
+- ❌ **Fully synchronous architecture** despite the project name "aio" (asyncio)
+- ❌ **No resilience patterns** (circuit breaker, exponential backoff, retry)
+- ❌ **Global state for signal handling** (anti-pattern)
+- ❌ **Missing error recovery** with a sensible backoff strategy
+- ❌ **No event-driven architecture**
 
-**Stärken:**
+**Strengths:**
 
-- ✅ Gute Modbus-Register-Clustering-Strategie
-- ✅ Saubere Facade-Pattern-Implementierung
-- ✅ Umfassende Register-Konfiguration in YAML
-- ✅ Solide Home Assistant Integration
+- ✅ Solid Modbus register clustering strategy
+- ✅ Clean facade pattern implementation
+- ✅ Comprehensive register configuration in YAML
+- ✅ Solid Home Assistant integration
 
-**Wichtiger Hinweis zur Kompatibilität:**
+**Important compatibility note:**
 
-> ⚠️ **KRITISCH:** Alle Modernisierungen müssen die **MQTT-Topic-Struktur und Payload-Formate** beibehalten. Home Assistant Integrationen dürfen nicht beeinträchtigt werden. Die Topics `MTEC/<serial>/...` und JSON-Formate sind **API-Contracts** und **MÜSSEN** identisch bleiben.
+> ⚠️ **CRITICAL:** All modernizations must preserve the **MQTT topic structure and payload formats**. Home Assistant integrations must not be impaired. The topics `MTEC/<serial>/...` and JSON formats are **API contracts** and **MUST** remain identical.
 
 ---
 
-## 1. Ist-Zustand: Async vs. Sync
+## 1. Current State: Async vs. Sync
 
-### 1.1 Aktuelle Implementierung: 100% Synchron
+### 1.1 Current Implementation: 100% Synchronous
 
-Trotz des Projektnamens `aiomtec2mqtt` ist der gesamte Code **synchron**:
+Despite the project name `aiomtec2mqtt`, the entire codebase is **synchronous**:
 
 ```python
-# ❌ AKTUELL: Vollständig synchron
+# ❌ CURRENT: Fully synchronous
 # mtec_coordinator.py:162-214
 
 def run(self) -> None:
@@ -52,29 +52,29 @@ def run(self) -> None:
         time.sleep(self._mqtt_refresh_now)  # ❌ Blocks entire application (10s)
 ```
 
-**Blocking-Operationen identifiziert:**
+**Identified blocking operations:**
 
-| Datei                 | Zeile   | Operation                         | Block-Zeit | Impact                    |
-| --------------------- | ------- | --------------------------------- | ---------- | ------------------------- |
-| `mtec_coordinator.py` | 127     | `time.sleep(10)`                  | 10s        | Reconnect blockiert alles |
-| `mtec_coordinator.py` | 147     | `time.sleep(10)`                  | 10s        | Init-Loop blockiert       |
-| `mtec_coordinator.py` | 214     | `time.sleep(refresh)`             | 10s+       | Main-Loop-Sleep           |
-| `modbus_client.py`    | 262-273 | `client.read_holding_registers()` | 5s         | Modbus-Read blockiert     |
-| `mqtt_client.py`      | 156     | `client.publish()`                | Variable   | MQTT blockiert (selten)   |
+| File                  | Line    | Operation                         | Block time | Impact                      |
+| --------------------- | ------- | --------------------------------- | ---------- | --------------------------- |
+| `mtec_coordinator.py` | 127     | `time.sleep(10)`                  | 10s        | Reconnect blocks everything |
+| `mtec_coordinator.py` | 147     | `time.sleep(10)`                  | 10s        | Init loop blocks            |
+| `mtec_coordinator.py` | 214     | `time.sleep(refresh)`             | 10s+       | Main loop sleep             |
+| `modbus_client.py`    | 262-273 | `client.read_holding_registers()` | 5s         | Modbus read blocks          |
+| `mqtt_client.py`      | 156     | `client.publish()`                | Variable   | MQTT blocks (rare)          |
 
-**Konsequenzen:**
+**Consequences:**
 
-- 🔴 **Network Jitter kann nicht absorbiert werden**: Wenn Modbus langsam ist, verzögert sich MQTT
-- 🔴 **Kaskadierende Fehler**: Ein langsamer Read blockiert alle nachfolgenden Reads
-- 🔴 **Keine echte Event-Architektur**: Fixed polling unabhängig von Datenaktualität
-- 🔴 **Thread-Model untergenutzt**: MQTT nutzt Background-Thread, aber Coordinator ist Single-Threaded
+- 🔴 **Network jitter cannot be absorbed**: If Modbus is slow, MQTT is delayed
+- 🔴 **Cascading failures**: A single slow read blocks all subsequent reads
+- 🔴 **No real event-driven architecture**: Fixed polling regardless of data freshness
+- 🔴 **Thread model underused**: MQTT uses a background thread, but the coordinator is single-threaded
 
-### 1.2 Soll-Zustand: Asynchrone Architektur
+### 1.2 Target State: Asynchronous Architecture
 
-**Zielarchitektur:**
+**Target architecture:**
 
 ```python
-# ✅ ZIEL: Asynchrone Architektur
+# ✅ TARGET: Asynchronous architecture
 
 class AsyncMtecCoordinator:
     async def run(self) -> None:
@@ -99,22 +99,22 @@ class AsyncMtecCoordinator:
             await asyncio.sleep(self._refresh_now)  # ✅ Non-blocking
 ```
 
-**Vorteile:**
+**Benefits:**
 
-- ✅ **Concurrent I/O**: Modbus und MQTT können parallel laufen
-- ✅ **Non-blocking Sleep**: `asyncio.sleep()` blockiert nicht den Event Loop
-- ✅ **Error Isolation**: Ein fehlerhafter Task stoppt nicht alle anderen
-- ✅ **Graceful Shutdown**: `asyncio.TaskGroup` managed Lifecycle automatisch
+- ✅ **Concurrent I/O**: Modbus and MQTT can run in parallel
+- ✅ **Non-blocking sleep**: `asyncio.sleep()` does not block the event loop
+- ✅ **Error isolation**: A failing task does not stop the others
+- ✅ **Graceful shutdown**: `asyncio.TaskGroup` manages lifecycle automatically
 
-### 1.3 Migrations-Strategie (Phase 1)
+### 1.3 Migration Strategy (Phase 1)
 
-**Schritt 1: Einführung von `asyncio` ohne API-Breaking-Changes**
+**Step 1: Introduce `asyncio` without API-breaking changes**
 
 ```python
-# Hybrid-Ansatz: Sync-Wrapper um Async-Core
+# Hybrid approach: sync wrapper around async core
 
 class MtecCoordinator:
-    """Sync facade für Backward-Kompatibilität."""
+    """Sync facade for backward compatibility."""
 
     def __init__(self):
         self._async_coordinator = AsyncMtecCoordinator()
@@ -128,10 +128,10 @@ class MtecCoordinator:
         self._async_coordinator.request_stop()
 ```
 
-**Schritt 2: Async Modbus Client**
+**Step 2: Async Modbus Client**
 
 ```python
-# Verwende pymodbus 3.x native async support
+# Use pymodbus 3.x native async support
 from pymodbus.client import AsyncModbusTcpClient
 
 class AsyncModbusClient:
@@ -156,10 +156,10 @@ class AsyncModbusClient:
             raise ModbusTimeoutError(f"Timeout reading {group}")
 ```
 
-**Schritt 3: Async MQTT Client**
+**Step 3: Async MQTT Client**
 
 ```python
-# Verwende aiomqtt statt paho-mqtt
+# Use aiomqtt instead of paho-mqtt
 import aiomqtt
 
 class AsyncMqttClient:
@@ -176,26 +176,26 @@ class AsyncMqttClient:
             raise MqttPublishError(f"Failed to publish to {topic}") from ex
 ```
 
-**⚠️ WICHTIG: MQTT-Format bleibt identisch**
+**⚠️ IMPORTANT: MQTT format remains identical**
 
 ```python
-# ✅ Topic-Struktur bleibt gleich
+# ✅ Topic structure stays the same
 topic = f"MTEC/{serial_no}/now-base"
 
-# ✅ Payload-Format bleibt gleich
+# ✅ Payload format stays the same
 payload = {
     "grid_power": 1234,
     "battery_soc": 85,
     "inverter_status": 2,
-    # ... identisch zu aktueller Version
+    # ... identical to current version
 }
 
-# ✅ Home Assistant Discovery bleibt identisch
+# ✅ Home Assistant discovery stays identical
 discovery_topic = f"homeassistant/sensor/{serial_no}_grid_power/config"
 discovery_payload = {
     "state_topic": f"MTEC/{serial_no}/now-base",
     "value_template": "{{ value_json.grid_power }}",
-    # ... identisch zu aktueller Version
+    # ... identical to current version
 }
 ```
 
@@ -203,21 +203,21 @@ discovery_payload = {
 
 ## 2. Error Handling & Recovery
 
-### 2.1 Ist-Zustand: Inkonsistent und unvollständig
+### 2.1 Current State: Inconsistent and Incomplete
 
-**Aktuelles Error-Handling:**
+**Current error handling:**
 
-| Modul                 | Exception Handling  | Recovery              | Probleme                |
-| --------------------- | ------------------- | --------------------- | ----------------------- |
-| `mtec_coordinator.py` | 3 try-except blocks | Silent failures       | Keine Backoff-Strategie |
-| `modbus_client.py`    | 5 handlers          | Log + return None     | Kein Circuit Breaker    |
-| `mqtt_client.py`      | 7 handlers          | Log warnings          | Keine Retry-Queue       |
-| `config.py`           | 4 handlers          | sys.exit / empty dict | Inkonsistent            |
+| Module                | Exception handling  | Recovery              | Issues              |
+| --------------------- | ------------------- | --------------------- | ------------------- |
+| `mtec_coordinator.py` | 3 try-except blocks | Silent failures       | No backoff strategy |
+| `modbus_client.py`    | 5 handlers          | Log + return None     | No circuit breaker  |
+| `mqtt_client.py`      | 7 handlers          | Log warnings          | No retry queue      |
+| `config.py`           | 4 handlers          | sys.exit / empty dict | Inconsistent        |
 
-**Kritisches Beispiel - Breite Exception ohne Diskriminierung:**
+**Critical example — broad exception without discrimination:**
 
 ```python
-# ❌ PROBLEM: Fängt ALLE Exceptions, auch Programmer-Errors
+# ❌ PROBLEM: Catches ALL exceptions, including programmer errors
 # mtec_coordinator.py:81-83
 
 except Exception:
@@ -225,47 +225,47 @@ except Exception:
     self._registers_by_group = {}
 ```
 
-**Folgen:**
+**Consequences:**
 
 - 🔴 Swallowed programmer errors (TypeError, AttributeError, etc.)
-- 🔴 Memory corruption könnte unbemerkt bleiben
-- 🔴 Keine Unterscheidung zwischen recoverable/non-recoverable errors
+- 🔴 Memory corruption could go unnoticed
+- 🔴 No distinction between recoverable and non-recoverable errors
 
-**Fehlende Error-Recovery im Polling-Loop:**
+**Missing error recovery in the polling loop:**
 
 ```python
-# ❌ PROBLEM: Fehlerhafte Reads werden ignoriert
+# ❌ PROBLEM: Failed reads are ignored
 # mtec_coordinator.py:170-187
 
 if pvdata := self.read_mtec_data(group=RegisterGroup.BASE):
     self.write_to_mqtt(...)
-# ❌ Wenn read_mtec_data fehlschlägt: Keine Retry, keine Alert, einfach weiter
+# ❌ When read_mtec_data fails: no retry, no alert, just continues
 ```
 
-**Hard-coded Reconnection ohne Backoff:**
+**Hard-coded reconnection without backoff:**
 
 ```python
-# ❌ PROBLEM: Immer 10s, egal welcher Fehler
+# ❌ PROBLEM: Always 10s, no matter the error
 # mtec_coordinator.py:123-129
 
 def _reconnect_modbus(self) -> None:
     self._modbus_client.disconnect()
-    time.sleep(10)  # ❌ FIXED 10s IMMER
+    time.sleep(10)  # ❌ ALWAYS A FIXED 10s
     self._modbus_client.connect()
 ```
 
-**Probleme:**
+**Issues:**
 
-- 🔴 Kein exponentieller Backoff
-- 🔴 Kein Maximum-Retry-Limit
-- 🔴 Gleicher Delay für alle Fehlerszenarien (Timeout vs. Connection Refused)
-- 🔴 Erzeugt 10s Blocking-Gap bei error_count > 10
+- 🔴 No exponential backoff
+- 🔴 No maximum retry limit
+- 🔴 Same delay for all error scenarios (timeout vs. connection refused)
+- 🔴 Creates a 10s blocking gap when error_count > 10
 
-### 2.2 Soll-Zustand: Robuste Error-Recovery mit Resilience-Patterns
+### 2.2 Target State: Robust Error Recovery with Resilience Patterns
 
 #### 2.2.1 Circuit Breaker Pattern
 
-**Implementierung:**
+**Implementation:**
 
 ```python
 from enum import Enum
@@ -351,9 +351,9 @@ class AsyncModbusClient:
         )
 ```
 
-#### 2.2.2 Exponential Backoff mit Jitter
+#### 2.2.2 Exponential Backoff with Jitter
 
-**Implementierung:**
+**Implementation:**
 
 ```python
 import random
@@ -431,28 +431,28 @@ async def reconnect_modbus():
     )
 ```
 
-**Delay-Progression Beispiel:**
+**Delay progression example:**
 
-| Attempt | Delay (ohne Jitter) | Delay (mit Jitter ±25%) | Total Time |
-| ------- | ------------------- | ----------------------- | ---------- |
-| 1       | 1.0s                | 0.75s - 1.25s           | ~1s        |
-| 2       | 2.0s                | 1.5s - 2.5s             | ~3s        |
-| 3       | 4.0s                | 3.0s - 5.0s             | ~7s        |
-| 4       | 8.0s                | 6.0s - 10.0s            | ~15s       |
-| 5       | 16.0s               | 12.0s - 20.0s           | ~31s       |
+| Attempt | Delay (no jitter) | Delay (with jitter ±25%) | Total time |
+| ------- | ----------------- | ------------------------ | ---------- |
+| 1       | 1.0s              | 0.75s - 1.25s            | ~1s        |
+| 2       | 2.0s              | 1.5s - 2.5s              | ~3s        |
+| 3       | 4.0s              | 3.0s - 5.0s              | ~7s        |
+| 4       | 8.0s              | 6.0s - 10.0s             | ~15s       |
+| 5       | 16.0s             | 12.0s - 20.0s            | ~31s       |
 
-Statt aktuell **5 × 10s = 50s** (fixed) → **~31s** (adaptive, aber mit Variance)
+Instead of the current **5 × 10s = 50s** (fixed) → **~31s** (adaptive, but with variance)
 
-#### 2.2.3 Error Context und Typed Exceptions
+#### 2.2.3 Error Context and Typed Exceptions
 
-**Aktuelle Schwäche:**
+**Current weakness:**
 
 ```python
-# ❌ Caller kann nicht unterscheiden zwischen Fehler-Typen
-if pvdata := self.read_mtec_data(...):  # None bei Fehler ODER keine Daten
+# ❌ Caller cannot distinguish between error types
+if pvdata := self.read_mtec_data(...):  # None on error OR no data
 ```
 
-**Verbesserung:**
+**Improvement:**
 
 ```python
 # Custom Exception Hierarchy
@@ -477,7 +477,7 @@ class MqttPublishError(MqttError):
 class ConfigurationError(MtecError):
     """Configuration validation failed."""
 
-# Usage mit Error Context:
+# Usage with error context:
 from dataclasses import dataclass
 from typing import Optional
 
@@ -522,16 +522,16 @@ async def read_mtec_data(group: RegisterGroup) -> ReadResult:
             timestamp=datetime.now()
         )
 
-# Caller kann jetzt intelligente Entscheidungen treffen:
+# Callers can now make informed decisions:
 result = await coordinator.read_mtec_data(RegisterGroup.BASE)
 if result.success:
     await mqtt_client.publish(topic, result.data)
 elif result.is_timeout:
-    # Timeout → vielleicht nur dieses Register überspringen
+    # Timeout → maybe just skip this register
     _LOGGER.warning("Timeout reading BASE, using cached data")
     await mqtt_client.publish(topic, cache.get_last_known(RegisterGroup.BASE))
 elif result.is_connection_error:
-    # Connection Error → Circuit Breaker öffnen
+    # Connection error → open the circuit breaker
     circuit_breaker.record_failure()
 ```
 
@@ -539,25 +539,25 @@ elif result.is_connection_error:
 
 ## 3. Design Patterns
 
-### 3.1 Aktuell implementiert
+### 3.1 Currently Implemented
 
-| Pattern                  | Status | Qualität                       | Datei                                |
-| ------------------------ | ------ | ------------------------------ | ------------------------------------ |
-| **Coordinator**          | ✅     | Gut, aber monolithisch         | `mtec_coordinator.py:50`             |
-| **Facade**               | ✅     | Sehr gut                       | `modbus_client.py`, `mqtt_client.py` |
-| **Registry**             | ✅     | Gut                            | `modbus_client.py:29-47`             |
-| **Observer**             | ⚠️     | Teilweise (nur MQTT callbacks) | `mqtt_client.py:37`                  |
-| **Factory**              | ❌     | Nicht implementiert            | -                                    |
-| **State Machine**        | ❌     | Fehlt komplett                 | -                                    |
-| **Dependency Injection** | ⚠️     | Minimal                        | `mtec_coordinator.py:64-70`          |
+| Pattern                  | Status | Quality                       | File                                 |
+| ------------------------ | ------ | ----------------------------- | ------------------------------------ |
+| **Coordinator**          | ✅     | Good, but monolithic          | `mtec_coordinator.py:50`             |
+| **Facade**               | ✅     | Very good                     | `modbus_client.py`, `mqtt_client.py` |
+| **Registry**             | ✅     | Good                          | `modbus_client.py:29-47`             |
+| **Observer**             | ⚠️     | Partial (only MQTT callbacks) | `mqtt_client.py:37`                  |
+| **Factory**              | ❌     | Not implemented               | -                                    |
+| **State Machine**        | ❌     | Completely missing            | -                                    |
+| **Dependency Injection** | ⚠️     | Minimal                       | `mtec_coordinator.py:64-70`          |
 
-### 3.2 Empfohlene Pattern-Erweiterungen
+### 3.2 Recommended Pattern Extensions
 
 #### 3.2.1 Event Bus Pattern
 
-**Problem:** Keine lose Kopplung zwischen Komponenten, schwer testbar
+**Problem:** No loose coupling between components, hard to test
 
-**Lösung: Event-Driven Architecture**
+**Solution: event-driven architecture**
 
 ```python
 from typing import Protocol, Callable, Any
@@ -664,18 +664,18 @@ class MetricsCollector:
             self.modbus_reconnections_total.inc()
 ```
 
-**Vorteile:**
+**Benefits:**
 
-- ✅ Lose Kopplung: Komponenten kennen sich nicht direkt
-- ✅ Testbarkeit: Einfach Events zu mocken
-- ✅ Erweiterbarkeit: Neue Subscriber ohne Code-Änderungen
-- ✅ Observability: Metrics/Logging als Subscriber
+- ✅ Loose coupling: components do not know each other directly
+- ✅ Testability: easy to mock events
+- ✅ Extensibility: new subscribers without code changes
+- ✅ Observability: metrics/logging as subscribers
 
 #### 3.2.2 State Machine Pattern
 
-**Problem:** Connection-States nicht formalisiert
+**Problem:** Connection states are not formalized
 
-**Lösung: Explizite State Machine**
+**Solution: explicit state machine**
 
 ```python
 from enum import Enum, auto
@@ -767,17 +767,17 @@ class AsyncModbusClient:
             raise
 ```
 
-#### 3.2.3 Registry Pattern Erweiterung
+#### 3.2.3 Registry Pattern Extension
 
-**Aktuelle Implementierung gut, aber:**
+**Current implementation is good, but:**
 
 ```python
-# ❌ Register-Definitionen sind statisch
-# ❌ Keine Runtime-Registrierung möglich
-# ❌ Keine Plugin-Architektur
+# ❌ Register definitions are static
+# ❌ No runtime registration possible
+# ❌ No plugin architecture
 ```
 
-**Verbesserung: Dynamic Registry**
+**Improvement: dynamic registry**
 
 ```python
 from typing import Protocol, TypeVar, Generic
@@ -861,9 +861,9 @@ registry.register("10008", EquipmentInfoProcessor(EQUIPMENT), {"mqtt": "equipmen
 
 ## 4. Dependency Injection & IoC
 
-### 4.1 Ist-Zustand: Minimal DI
+### 4.1 Current State: Minimal DI
 
-**Aktuelle Implementierung:**
+**Current implementation:**
 
 ```python
 # ❌ Hard-coded dependencies
@@ -879,16 +879,16 @@ class MtecCoordinator:
         self._mqtt_client = mqtt_client.MqttClient(...)
 ```
 
-**Probleme:**
+**Issues:**
 
-- 🔴 Tight coupling zu konkreten Implementierungen
-- 🔴 Schwer zu testen (keine Mocks möglich ohne Monkeypatching)
-- 🔴 Config immer von YAML-Datei geladen
-- 🔴 Keine Möglichkeit, alternative Implementierungen zu nutzen
+- 🔴 Tight coupling to concrete implementations
+- 🔴 Hard to test (no mocks possible without monkeypatching)
+- 🔴 Config always loaded from a YAML file
+- 🔴 No way to use alternative implementations
 
-### 4.2 Soll-Zustand: Proper DI mit Protocols
+### 4.2 Target State: Proper DI with Protocols
 
-**Schritt 1: Define Protocols (Interfaces)**
+**Step 1: define protocols (interfaces)**
 
 ```python
 from typing import Protocol, runtime_checkable
@@ -952,7 +952,7 @@ class ConfigProviderProtocol(Protocol):
         ...
 ```
 
-**Schritt 2: Dependency Injection Container**
+**Step 2: dependency injection container**
 
 ```python
 from typing import TypeVar, Type, Callable, Any
@@ -1029,7 +1029,7 @@ def create_container(config_path: str | None = None) -> ServiceContainer:
     return container
 ```
 
-**Schritt 3: Constructor Injection**
+**Step 3: constructor injection**
 
 ```python
 class AsyncMtecCoordinator:
@@ -1065,7 +1065,7 @@ coordinator = AsyncMtecCoordinator(
     event_bus=container.resolve(EventBus)
 )
 
-# Testing wird einfach:
+# Testing becomes simple:
 class FakeModbusClient:
     """Fake Modbus client for testing."""
     async def connect(self) -> bool:
@@ -1077,7 +1077,7 @@ class FakeModbusClient:
 fake_modbus = FakeModbusClient()
 test_coordinator = AsyncMtecCoordinator(
     config=test_config,
-    modbus_client=fake_modbus,  # ✅ Einfach zu mocken!
+    modbus_client=fake_modbus,  # ✅ Easy to mock!
     mqtt_client=fake_mqtt,
     event_bus=test_event_bus
 )
@@ -1085,11 +1085,11 @@ test_coordinator = AsyncMtecCoordinator(
 
 ---
 
-## 5. Register-Konfiguration verbessern
+## 5. Improving Register Configuration
 
-### 5.1 Ist-Zustand: YAML + Python-Code
+### 5.1 Current State: YAML + Python code
 
-**Aktuelle Struktur:**
+**Current structure:**
 
 ```yaml
 # registers.yaml
@@ -1104,18 +1104,18 @@ test_coordinator = AsyncMtecCoordinator(
   hass_state_class: measurement
 ```
 
-**Probleme:**
+**Issues:**
 
-1. **Keine Schema-Validierung:**
+1. **No schema validation:**
 
 ```python
-# ❌ Nur Presence-Check, keine Type-Validation
+# ❌ Only presence check, no type validation
 for p in MANDATORY_PARAMETERS:
     if not val.get(p):
         error = True
 ```
 
-2. **Berechnete Register sind Hard-coded:**
+2. **Calculated registers are hard-coded:**
 
 ```python
 # ❌ mtec_coordinator.py:297-342
@@ -1123,7 +1123,7 @@ elif register == "consumption":
     pvdata[mqtt_key] = rdata["11016"][RV] - rdata["11000"][RV]
 ```
 
-3. **Register-spezifische Logik verstreut:**
+3. **Register-specific logic is scattered:**
 
 ```python
 # ❌ mtec_coordinator.py:286-338
@@ -1133,9 +1133,9 @@ elif register == "10008":  # Equipment info
     entry[RV] = _get_equipment_info(value=value)
 ```
 
-### 5.2 Soll-Zustand: JSON Schema + Processors
+### 5.2 Target State: JSON Schema + Processors
 
-**Schritt 1: JSON Schema für Validierung**
+**Step 1: JSON schema for validation**
 
 ```python
 # register_schema.py
@@ -1237,15 +1237,15 @@ def load_register_map(yaml_path: str) -> RegisterMap:
         raise ConfigurationError("Invalid register configuration") from ex
 ```
 
-**Schritt 2: Deklarative Calculated Registers**
+**Step 2: declarative calculated registers**
 
 ```yaml
-# registers.yaml (erweitert)
+# registers.yaml (extended)
 calculated:
   consumption:
     mqtt: consumption
     name: Household consumption
-    formula: "inverter - grid_power" # Referenziert andere Register via MQTT-Namen
+    formula: "inverter - grid_power" # References other registers via MQTT names
     dependencies: ["11016", "11000"]
     unit: W
     hass:
@@ -1266,14 +1266,14 @@ calculated:
     mqtt: autarky_rate_day
     name: Daily autarky rate
     formula: "100 * (1 - grid_purchase_day / max(consumption_day, 0.001))"
-    dependencies: ["consumption_day", "31001"] # Kann andere calculated refs nutzen
+    dependencies: ["consumption_day", "31001"] # Can reference other calculated values
     unit: "%"
     hass:
       device_class: power_factor
       state_class: measurement
 ```
 
-**Schritt 3: Formula Evaluator**
+**Step 3: formula evaluator**
 
 ```python
 import ast
@@ -1376,23 +1376,23 @@ class CalculatedRegisterProcessor:
         return results
 ```
 
-**Vorteile:**
+**Benefits:**
 
-- ✅ Keine Python-Code-Änderungen für neue berechnete Register
-- ✅ Formeln in YAML sind leicht lesbar und wartbar
-- ✅ Dependency-Tracking automatisch
-- ✅ Safe evaluation (nur erlaubte Operatoren)
-- ✅ Kann auf andere berechnete Register verweisen
+- ✅ No Python code changes for new calculated registers
+- ✅ Formulas in YAML are easy to read and maintain
+- ✅ Automatic dependency tracking
+- ✅ Safe evaluation (only allowed operators)
+- ✅ Can reference other calculated registers
 
 ---
 
-## 6. MQTT-Topic-Struktur & Backward-Kompatibilität
+## 6. MQTT Topic Structure & Backward Compatibility
 
-### 6.1 Kritische Anforderung
+### 6.1 Critical Requirement
 
-> ⚠️ **WICHTIG:** Alle MQTT-Topics und Payloads **MÜSSEN** identisch zur aktuellen Version bleiben!
+> ⚠️ **IMPORTANT:** All MQTT topics and payloads **MUST** remain identical to the current version!
 
-**Aktuelle Topic-Struktur (MUSS beibehalten werden):**
+**Current topic structure (MUST be preserved):**
 
 ```
 MTEC/<serial_number>/config
@@ -1407,7 +1407,7 @@ MTEC/<serial_number>/total
 MTEC/<serial_number>/static
 ```
 
-**Payload-Format (MUSS beibehalten werden):**
+**Payload format (MUST be preserved):**
 
 ```json
 {
@@ -1419,7 +1419,7 @@ MTEC/<serial_number>/static
 }
 ```
 
-**Home Assistant Discovery (MUSS identisch bleiben):**
+**Home Assistant discovery (MUST remain identical):**
 
 ```json
 {
@@ -1439,7 +1439,7 @@ MTEC/<serial_number>/static
 }
 ```
 
-### 6.2 Kompatibilitäts-Test-Suite
+### 6.2 Compatibility Test Suite
 
 ```python
 import pytest
@@ -1465,7 +1465,7 @@ class TestMqttBackwardCompatibility:
                         "ac_voltage_b_c", "ac_voltage_c_a", "ac_voltage_a",
                         "ac_current_a", "ac_voltage_b", "ac_current_b",
                         "ac_voltage_c", "ac_current_c", "ac_fequency"],
-            # ... alle anderen Gruppen
+            # ... all other groups
         }
 
     async def test_topic_structure_unchanged(
@@ -1540,9 +1540,9 @@ class TestMqttBackwardCompatibility:
                     f"{key} has too many decimals: {value}"
 ```
 
-### 6.3 Versioning-Strategie
+### 6.3 Versioning Strategy
 
-**Für zukünftige API-Änderungen:**
+**For future API changes:**
 
 ```python
 class MqttApiVersion(Enum):
@@ -1918,105 +1918,105 @@ logger.info(
 
 ---
 
-## 8. Implementierungs-Roadmap
+## 8. Implementation Roadmap
 
-### Phase 1: Stabilisierung (2-3 Wochen)
+### Phase 1: Stabilization (2-3 weeks)
 
-**Ziel:** Production-ready ohne Breaking Changes
+**Goal:** Production-ready without breaking changes
 
 | Task                              | Priority | Effort | Dependencies |
 | --------------------------------- | -------- | ------ | ------------ |
-| Exponential Backoff für Reconnect | CRITICAL | Low    | -            |
-| Circuit Breaker Pattern           | CRITICAL | Medium | -            |
-| Typed Exceptions + Error Context  | HIGH     | Low    | -            |
-| State Machine für Connections     | HIGH     | Medium | -            |
-| Health Check Endpoints            | HIGH     | Medium | -            |
-| Backward-Compat Test Suite        | CRITICAL | Medium | -            |
+| Exponential backoff for reconnect | CRITICAL | Low    | -            |
+| Circuit breaker pattern           | CRITICAL | Medium | -            |
+| Typed exceptions + error context  | HIGH     | Low    | -            |
+| State machine for connections     | HIGH     | Medium | -            |
+| Health check endpoints            | HIGH     | Medium | -            |
+| Backward-compat test suite        | CRITICAL | Medium | -            |
 
 **Deliverables:**
 
-- ✅ Keine festen 10s-Sleeps mehr
-- ✅ Intelligent Fail-Fast bei wiederholten Fehlern
-- ✅ Klare Error-Types statt breites Exception-Catching
-- ✅ HTTP Health-Endpoint für Monitoring
-- ✅ CI/CD-Tests für MQTT-Kompatibilität
+- ✅ No more fixed 10s sleeps
+- ✅ Intelligent fail-fast on repeated errors
+- ✅ Clear error types instead of broad exception catching
+- ✅ HTTP health endpoint for monitoring
+- ✅ CI/CD tests for MQTT compatibility
 
-### Phase 2: Async Migration (4-6 Wochen)
+### Phase 2: Async Migration (4-6 weeks)
 
-**Ziel:** Async I/O ohne API-Breaking-Changes
+**Goal:** Async I/O without API-breaking changes
 
 | Task                                    | Priority | Effort | Dependencies  |
 | --------------------------------------- | -------- | ------ | ------------- |
 | AsyncModbusClient (pymodbus 3.x native) | HIGH     | Medium | Phase 1       |
 | AsyncMqttClient (aiomqtt)               | HIGH     | Medium | Phase 1       |
-| AsyncCoordinator mit TaskGroups         | HIGH     | High   | Async clients |
-| Event Bus Implementierung               | MEDIUM   | Medium | -             |
-| Sync Wrapper für Backward-Compat        | HIGH     | Low    | Async coord   |
-| Performance-Tests                       | HIGH     | Medium | All async     |
+| AsyncCoordinator with TaskGroups        | HIGH     | High   | Async clients |
+| Event bus implementation                | MEDIUM   | Medium | -             |
+| Sync wrapper for backward compat        | HIGH     | Low    | Async coord   |
+| Performance tests                       | HIGH     | Medium | All async     |
 
 **Deliverables:**
 
 - ✅ Non-blocking I/O operations
-- ✅ Concurrent register reads möglich
+- ✅ Concurrent register reads possible
 - ✅ Event-driven architecture
-- ✅ Sync facade erhält API-Kompatibilität
-- ✅ 50%+ Performance-Verbesserung
+- ✅ Sync facade preserves API compatibility
+- ✅ 50%+ performance improvement
 
-### Phase 3: Architektur-Modernisierung (3-4 Wochen)
+### Phase 3: Architecture Modernization (3-4 weeks)
 
-**Ziel:** Clean Architecture mit DI
+**Goal:** Clean architecture with DI
 
 | Task                            | Priority | Effort | Dependencies |
 | ------------------------------- | -------- | ------ | ------------ |
-| Protocol-basierte Abstractions  | MEDIUM   | Medium | Phase 2      |
-| Service Container (DI)          | MEDIUM   | Medium | Protocols    |
-| JSON Schema Register Validation | MEDIUM   | Medium | -            |
-| Calculated Register Engine      | MEDIUM   | High   | Validation   |
-| Register Processor Registry     | MEDIUM   | Medium | Validation   |
-| Integration Tests mit DI        | MEDIUM   | High   | All above    |
+| Protocol-based abstractions     | MEDIUM   | Medium | Phase 2      |
+| Service container (DI)          | MEDIUM   | Medium | Protocols    |
+| JSON schema register validation | MEDIUM   | Medium | -            |
+| Calculated register engine      | MEDIUM   | High   | Validation   |
+| Register processor registry     | MEDIUM   | Medium | Validation   |
+| Integration tests with DI       | MEDIUM   | High   | All above    |
 
 **Deliverables:**
 
-- ✅ Testbare Architektur
-- ✅ Mocking ohne Monkeypatching
-- ✅ Deklarative Register-Konfiguration
-- ✅ Formulas in YAML statt Python
+- ✅ Testable architecture
+- ✅ Mocking without monkeypatching
+- ✅ Declarative register configuration
+- ✅ Formulas in YAML instead of Python
 
-### Phase 4: Observability & Operations (2-3 Wochen)
+### Phase 4: Observability & Operations (2-3 weeks)
 
-**Ziel:** Production-grade Monitoring
+**Goal:** Production-grade monitoring
 
 | Task                 | Priority | Effort | Dependencies |
 | -------------------- | -------- | ------ | ------------ |
-| Prometheus Metrics   | HIGH     | Medium | Phase 2      |
-| Structured Logging   | MEDIUM   | Low    | -            |
-| Grafana Dashboard    | MEDIUM   | Medium | Metrics      |
-| Alerting Rules       | MEDIUM   | Medium | Metrics      |
-| Documentation Update | HIGH     | Medium | All phases   |
+| Prometheus metrics   | HIGH     | Medium | Phase 2      |
+| Structured logging   | MEDIUM   | Low    | -            |
+| Grafana dashboard    | MEDIUM   | Medium | Metrics      |
+| Alerting rules       | MEDIUM   | Medium | Metrics      |
+| Documentation update | HIGH     | Medium | All phases   |
 
 **Deliverables:**
 
 - ✅ Prometheus `/metrics` endpoint
 - ✅ Grafana dashboard template
-- ✅ Alerting für kritische Fehler
-- ✅ JSON-formatierte Logs
+- ✅ Alerting for critical errors
+- ✅ JSON-formatted logs
 
 ---
 
-## 9. Risiken & Mitigation
+## 9. Risks & Mitigation
 
-| Risiko                                  | Wahrscheinlichkeit | Impact   | Mitigation                                        |
-| --------------------------------------- | ------------------ | -------- | ------------------------------------------------- |
-| **Breaking MQTT API**                   | MEDIUM             | CRITICAL | Umfangreiche Backward-Compat-Tests; Feature-Flags |
-| **Performance-Regression**              | LOW                | HIGH     | Benchmarks vor/nach; Gradual Rollout              |
-| **Async-Bugs (Race Conditions)**        | MEDIUM             | HIGH     | Extensive async testing; Code review              |
-| **Library-Inkompatibilitäten**          | LOW                | MEDIUM   | Pin versions; Test in CI                          |
-| **Config-Migration-Fehler**             | MEDIUM             | MEDIUM   | Migrations-Tool; Validation                       |
-| **Home Assistant Discovery-Änderungen** | LOW                | CRITICAL | Frozen API contract; Integration tests            |
+| Risk                                 | Likelihood | Impact   | Mitigation                                     |
+| ------------------------------------ | ---------- | -------- | ---------------------------------------------- |
+| **Breaking MQTT API**                | MEDIUM     | CRITICAL | Extensive backward-compat tests; feature flags |
+| **Performance regression**           | LOW        | HIGH     | Benchmarks before/after; gradual rollout       |
+| **Async bugs (race conditions)**     | MEDIUM     | HIGH     | Extensive async testing; code review           |
+| **Library incompatibilities**        | LOW        | MEDIUM   | Pin versions; test in CI                       |
+| **Config migration errors**          | MEDIUM     | MEDIUM   | Migration tool; validation                     |
+| **Home Assistant discovery changes** | LOW        | CRITICAL | Frozen API contract; integration tests         |
 
-**Mitigation-Strategien:**
+**Mitigation strategies:**
 
-1. **Feature Flags:**
+1. **Feature flags:**
 
 ```python
 class FeatureFlags:
@@ -2025,7 +2025,7 @@ class FeatureFlags:
     USE_CIRCUIT_BREAKER = os.getenv("AIOMTEC_USE_CIRCUIT_BREAKER", "true") == "true"
 ```
 
-2. **Gradual Rollout:**
+2. **Gradual rollout:**
 
 ```python
 if FeatureFlags.USE_ASYNC:
@@ -2034,95 +2034,95 @@ else:
     coordinator = MtecCoordinator(...)  # Legacy
 ```
 
-3. **Canary Deployments:**
+3. **Canary deployments:**
 
-- 10% Users → Async version
-- 90% Users → Legacy version
-- Monitor metrics für 1 Woche
-- Bei OK: schrittweise erhöhen
+- 10% users → async version
+- 90% users → legacy version
+- Monitor metrics for 1 week
+- If OK: gradually scale up
 
 ---
 
-## 10. Referenzen & Best Practices
+## 10. References & Best Practices
 
-### Empfohlene Libraries
+### Recommended Libraries
 
-| Bereich      | Library             | Version | Grund                                   |
-| ------------ | ------------------- | ------- | --------------------------------------- |
-| Async Modbus | `pymodbus`          | 3.11.4+ | Native asyncio support, battle-tested   |
-| Async MQTT   | `aiomqtt`           | 2.5.0+  | Wrapper um paho-mqtt, idiomatisch async |
-| Validation   | `pydantic`          | 2.x     | Runtime type validation                 |
-| Testing      | `pytest-asyncio`    | Latest  | Async test support                      |
-| Mocking      | `pytest-mock`       | Latest  | Clean mocking                           |
-| Metrics      | `prometheus-client` | Latest  | De-facto standard                       |
+| Area         | Library             | Version | Reason                                    |
+| ------------ | ------------------- | ------- | ----------------------------------------- |
+| Async Modbus | `pymodbus`          | 3.11.4+ | Native asyncio support, battle-tested     |
+| Async MQTT   | `aiomqtt`           | 2.5.0+  | Wrapper around paho-mqtt, idiomatic async |
+| Validation   | `pydantic`          | 2.x     | Runtime type validation                   |
+| Testing      | `pytest-asyncio`    | Latest  | Async test support                        |
+| Mocking      | `pytest-mock`       | Latest  | Clean mocking                             |
+| Metrics      | `prometheus-client` | Latest  | De-facto standard                         |
 
-**Wichtige Hinweise:**
+**Important notes:**
 
-- ✅ **pymodbus 3.x** hat native async support - kein separater Wrapper nötig
-- ✅ **aiomqtt** ist ein Wrapper um paho-mqtt - nutzt bewährte paho Basis
-- ✅ Beide Libraries sind produktionsreif und aktiv maintained
+- ✅ **pymodbus 3.x** has native async support — no separate wrapper required
+- ✅ **aiomqtt** is a wrapper around paho-mqtt — leverages the proven paho base
+- ✅ Both libraries are production-ready and actively maintained
 
-### Ähnliche Projekte (Referenz-Architekturen)
+### Similar Projects (Reference Architectures)
 
-**aiohomematic** (als Referenz genannt):
+**aiohomematic** (referenced as a benchmark):
 
 ```python
-# Gute Patterns von aiohomematic:
+# Good patterns from aiohomematic:
 - Event-driven architecture
-- Strong typing mit Protocols
+- Strong typing with Protocols
 - Comprehensive error handling
-- State machines für Connections
-- Proper DI mit Factories
+- State machines for connections
+- Proper DI with factories
 ```
 
-**Zu übernehmen:**
+**Worth adopting:**
 
-- Connection State Management
-- Event Bus Pattern
-- Health Checks
-- Metrics Integration
-
----
-
-## 11. Zusammenfassung & Empfehlungen
-
-### Kritischste Punkte (sofort adressieren):
-
-1. **Exponential Backoff implementieren** (aktuell: fixed 10s)
-2. **Circuit Breaker Pattern** (aktuell: simple counter)
-3. **Backward-Compat Test-Suite** (bevor irgendwas geändert wird!)
-4. **Global State entfernen** (`run_status` global variable)
-
-### Mittelfristig (Phase 2-3):
-
-1. **Async Migration** (Performance + Responsiveness)
-2. **Event Bus** (Lose Kopplung)
-3. **DI Container** (Testbarkeit)
-4. **Register Engine** (Weniger Code-Duplikation)
-
-### Langfristig (Phase 4):
-
-1. **Observability** (Metrics, Dashboards)
-2. **Documentation** (Architecture Decision Records)
-3. **Plugin-System** (Erweiterbarkeit)
+- Connection state management
+- Event bus pattern
+- Health checks
+- Metrics integration
 
 ---
 
-**⚠️ WICHTIGSTE REGEL:**
+## 11. Summary & Recommendations
 
-> **MQTT-Topics (`MTEC/...`) und Payload-Formate dürfen sich NICHT ändern!**
+### Most Critical Items (address immediately):
+
+1. **Implement exponential backoff** (currently: fixed 10s)
+2. **Circuit breaker pattern** (currently: simple counter)
+3. **Backward-compat test suite** (before changing anything!)
+4. **Remove global state** (`run_status` global variable)
+
+### Mid-term (Phase 2-3):
+
+1. **Async migration** (performance + responsiveness)
+2. **Event bus** (loose coupling)
+3. **DI container** (testability)
+4. **Register engine** (less code duplication)
+
+### Long-term (Phase 4):
+
+1. **Observability** (metrics, dashboards)
+2. **Documentation** (architecture decision records)
+3. **Plugin system** (extensibility)
+
+---
+
+**⚠️ MOST IMPORTANT RULE:**
+
+> **MQTT topics (`MTEC/...`) and payload formats MUST NOT change!**
 >
-> Alle Modernisierungen müssen intern bleiben. Die externe API (MQTT) ist ein **Contract** mit Home Assistant und darf nicht gebrochen werden.
+> All modernizations must remain internal. The external API (MQTT) is a **contract** with Home Assistant and must not be broken.
 
 ---
 
-## 12. Priorisierte TODO-Liste mit Progress-Tracking
+## 12. Prioritized TODO List with Progress Tracking
 
-**Legende:**
+**Legend:**
 
-- 🔴 CRITICAL - Muss sofort adressiert werden
-- 🟠 HIGH - Wichtig für Stabilität
-- 🟡 MEDIUM - Verbesserung, nicht kritisch
+- 🔴 CRITICAL - Must be addressed immediately
+- 🟠 HIGH - Important for stability
+- 🟡 MEDIUM - Improvement, not critical
 - 🟢 LOW - Nice to have
 
 **Status:**
@@ -2135,140 +2135,140 @@ else:
 
 ---
 
-### Phase 0: Vorbereitung & Analyse (Woche 1)
+### Phase 0: Preparation & Analysis (Week 1)
 
-#### Setup & Grundlagen
+#### Setup & Foundations
 
-- [ ] 🟡 Repository Setup
+- [ ] 🟡 Repository setup
 
-  - [ ] ⬜ Branch-Strategie definieren (`main`, `develop`, `feature/*`)
-  - [ ] ⬜ Git-Flow einrichten
-  - [ ] ⬜ Pre-commit hooks konfigurieren
-  - [ ] ⬜ CI/CD Pipeline setup (GitHub Actions)
+  - [ ] ⬜ Define branching strategy (`main`, `develop`, `feature/*`)
+  - [ ] ⬜ Set up Git flow
+  - [ ] ⬜ Configure pre-commit hooks
+  - [ ] ⬜ Set up CI/CD pipeline (GitHub Actions)
 
-- [ ] 🟠 Development Environment
+- [ ] 🟠 Development environment
 
-  - [ ] ⬜ pymodbus 3.11.4+ installieren
-  - [ ] ⬜ aiomqtt 2.5.0+ installieren
-  - [ ] ⬜ pydantic 2.x installieren
-  - [ ] ⬜ pytest-asyncio installieren
-  - [ ] ⬜ prometheus-client installieren
-  - [ ] ⬜ requirements.txt aktualisieren
+  - [ ] ⬜ Install pymodbus 3.11.4+
+  - [ ] ⬜ Install aiomqtt 2.5.0+
+  - [ ] ⬜ Install pydantic 2.x
+  - [ ] ⬜ Install pytest-asyncio
+  - [ ] ⬜ Install prometheus-client
+  - [ ] ⬜ Update requirements.txt
 
-- [ ] 🔴 Baseline Tests
-  - [ ] ⬜ Aktuelle Funktionalität dokumentieren
-  - [ ] ⬜ Integration Tests für MQTT-Topics schreiben
-  - [ ] ⬜ Integration Tests für Payload-Formate schreiben
-  - [ ] ⬜ Snapshot Tests für HA Discovery Messages
-  - [ ] ⬜ Performance Baseline messen (latency, throughput)
+- [ ] 🔴 Baseline tests
+  - [ ] ⬜ Document current functionality
+  - [ ] ⬜ Write integration tests for MQTT topics
+  - [ ] ⬜ Write integration tests for payload formats
+  - [ ] ⬜ Snapshot tests for HA discovery messages
+  - [ ] ⬜ Measure performance baseline (latency, throughput)
 
-**Deliverable:** Dokumentierte Baseline, Test-Suite für Backward-Compat
+**Deliverable:** Documented baseline, test suite for backward compatibility
 
 ---
 
-### Phase 1: Stabilisierung (Wochen 2-4) - Production Ready
+### Phase 1: Stabilization (Weeks 2-4) - Production Ready
 
 **Status: 100% Complete (9/9 tasks) ✅**
 **Last Updated: 2026-01-20**
 
 #### 1.1 Error Handling Improvements
 
-- [x] ✅ Exponential Backoff
+- [x] ✅ Exponential backoff
 
-  - [x] ✅ `ExponentialBackoff` Klasse implementieren
+  - [x] ✅ Implement `ExponentialBackoff` class
   - [x] ✅ Base delay: 1s, max delay: 60s, exponential base: 2.0
-  - [x] ✅ Jitter ±25% implementieren
-  - [x] ✅ Unit tests für Retry-Logik (6 tests)
-  - [x] ✅ Integration mit Modbus client
-  - [x] ✅ Integration mit MQTT reconnect
+  - [x] ✅ Implement jitter ±25%
+  - [x] ✅ Unit tests for retry logic (6 tests)
+  - [x] ✅ Integration with Modbus client
+  - [x] ✅ Integration with MQTT reconnect
 
-- [x] ✅ Circuit Breaker Pattern
+- [x] ✅ Circuit breaker pattern
 
-  - [x] ✅ `CircuitBreaker` Klasse implementieren
+  - [x] ✅ Implement `CircuitBreaker` class
   - [x] ✅ States: CLOSED, OPEN, HALF_OPEN
-  - [x] ✅ Failure threshold: 5 (konfigurierbar)
-  - [x] ✅ Recovery timeout: 30s (konfigurierbar)
-  - [x] ✅ Half-open max calls: 1-2 (konfigurierbar)
-  - [x] ✅ Integration mit Modbus client
-  - [x] ✅ Metrics für Circuit Breaker states (statistics tracking)
-  - [x] ✅ Unit tests für State-Transitions (10 tests)
+  - [x] ✅ Failure threshold: 5 (configurable)
+  - [x] ✅ Recovery timeout: 30s (configurable)
+  - [x] ✅ Half-open max calls: 1-2 (configurable)
+  - [x] ✅ Integration with Modbus client
+  - [x] ✅ Metrics for circuit breaker states (statistics tracking)
+  - [x] ✅ Unit tests for state transitions (10 tests)
 
-- [x] ✅ Typed Exceptions
+- [x] ✅ Typed exceptions
 
-  - [x] ✅ Exception-Hierarchie definieren (`MtecException`, `ModbusException`, `MqttException`)
-  - [x] ✅ `ModbusTimeoutError` implementieren
-  - [x] ✅ `ModbusConnectionError` implementieren
-  - [x] ✅ `ModbusReadError` implementieren
-  - [x] ✅ `ModbusWriteError` implementieren
-  - [x] ✅ `ModbusDeviceError` implementieren
-  - [x] ✅ `MqttPublishError` implementieren
-  - [x] ✅ `MqttConnectionError` implementieren
-  - [x] ✅ `MqttSubscribeError` implementieren
-  - [x] ✅ `MqttAuthenticationError` implementieren
-  - [x] ✅ `ConfigurationError` implementieren
-  - [x] ✅ `CircuitBreakerOpenError` implementieren
-  - [x] ✅ `RetryableException` Mixin für transiente Fehler
-  - [x] ✅ Alle broad `except Exception` in modbus_client ersetzen
-  - [x] ✅ Alle broad `except Exception` in mqtt_client ersetzen
-  - [x] ✅ Error Context mit details dict
+  - [x] ✅ Define exception hierarchy (`MtecException`, `ModbusException`, `MqttException`)
+  - [x] ✅ Implement `ModbusTimeoutError`
+  - [x] ✅ Implement `ModbusConnectionError`
+  - [x] ✅ Implement `ModbusReadError`
+  - [x] ✅ Implement `ModbusWriteError`
+  - [x] ✅ Implement `ModbusDeviceError`
+  - [x] ✅ Implement `MqttPublishError`
+  - [x] ✅ Implement `MqttConnectionError`
+  - [x] ✅ Implement `MqttSubscribeError`
+  - [x] ✅ Implement `MqttAuthenticationError`
+  - [x] ✅ Implement `ConfigurationError`
+  - [x] ✅ Implement `CircuitBreakerOpenError`
+  - [x] ✅ `RetryableException` mixin for transient errors
+  - [x] ✅ Replace all broad `except Exception` in modbus_client
+  - [x] ✅ Replace all broad `except Exception` in mqtt_client
+  - [x] ✅ Error context with details dict
 
-- [x] ✅ Global State entfernen
-  - [x] ✅ `run_status` global variable eliminieren
-  - [x] ✅ `ShutdownManager` Klasse mit threading.Event
-  - [x] ✅ Signal handling über ShutdownManager
-  - [x] ✅ Callback-System für graceful shutdown
+- [x] ✅ Remove global state
+  - [x] ✅ Eliminate `run_status` global variable
+  - [x] ✅ `ShutdownManager` class with threading.Event
+  - [x] ✅ Signal handling via ShutdownManager
+  - [x] ✅ Callback system for graceful shutdown
   - [x] ✅ Unit tests (14 tests)
 
 #### 1.2 Connection State Management
 
-- [x] ✅ State Machine
-  - [x] ✅ `ConnectionState` Enum (DISCONNECTED, CONNECTING, CONNECTED, RECONNECTING, ERROR)
-  - [x] ✅ Transition validation implementiert
-  - [x] ✅ `ConnectionStateMachine` Klasse implementieren
-  - [x] ✅ Integration mit Modbus client
-  - [x] ✅ Integration mit MQTT client
+- [x] ✅ State machine
+  - [x] ✅ `ConnectionState` enum (DISCONNECTED, CONNECTING, CONNECTED, RECONNECTING, ERROR)
+  - [x] ✅ Transition validation implemented
+  - [x] ✅ Implement `ConnectionStateMachine` class
+  - [x] ✅ Integration with Modbus client
+  - [x] ✅ Integration with MQTT client
   - [x] ✅ State change callbacks
   - [x] ✅ State history tracking (timestamps)
-  - [x] ✅ Unit tests für valid/invalid transitions (9 tests)
+  - [x] ✅ Unit tests for valid/invalid transitions (9 tests)
 
 #### 1.3 Health Checks
 
-- [x] ✅ Health Check System
-  - [x] ✅ `HealthStatus` Enum (HEALTHY, DEGRADED, UNHEALTHY, UNKNOWN)
+- [x] ✅ Health check system
+  - [x] ✅ `HealthStatus` enum (HEALTHY, DEGRADED, UNHEALTHY, UNKNOWN)
   - [x] ✅ `ComponentHealth` dataclass
   - [x] ✅ `SystemHealth` dataclass
-  - [x] ✅ `HealthCheck` Klasse implementieren
-  - [x] ✅ Modbus health check implementieren
-  - [x] ✅ MQTT health check implementieren
-  - [x] ✅ Data freshness check implementieren (stale detection)
-  - [x] ✅ Overall system status berechnen
+  - [x] ✅ Implement `HealthCheck` class
+  - [x] ✅ Implement Modbus health check
+  - [x] ✅ Implement MQTT health check
+  - [x] ✅ Implement data freshness check (stale detection)
+  - [x] ✅ Compute overall system status
   - [ ] ⬜ HTTP endpoint `/health` (optional, deferred)
-  - [ ] ⬜ Health check loop in Coordinator (deferred)
+  - [ ] ⬜ Health check loop in coordinator (deferred)
   - [x] ✅ Unit tests (24 tests)
 
 #### 1.4 Testing & Validation
 
-- [x] ✅ Backward Compatibility Tests
+- [x] ✅ Backward compatibility tests
   - [x] ✅ Test: MQTT topic structure unchanged
   - [x] ✅ Test: Payload keys unchanged
   - [x] ✅ Test: HA discovery format unchanged
   - [x] ✅ Test: Numeric precision unchanged (max 3 decimals)
   - [x] ✅ Test: Register group names unchanged
   - [x] ✅ Comprehensive test suite (13 backward compat tests)
-  - [ ] ⬜ CI/CD Integration (deferred)
+  - [ ] ⬜ CI/CD integration (deferred)
 
 **Phase 1 Deliverables:**
 
-- ✅ Keine festen 10s-Sleeps mehr
-- ✅ Intelligent Fail-Fast bei wiederholten Fehlern
-- ✅ Klare Error-Types statt breites Exception-Catching
-- ✅ Connection States formal getrackt
-- ✅ Health-Checks vorhanden
-- ✅ 100% Backward-Kompatibilität sichergestellt
+- ✅ No more fixed 10s sleeps
+- ✅ Intelligent fail-fast on repeated errors
+- ✅ Clear error types instead of broad exception catching
+- ✅ Connection states formally tracked
+- ✅ Health checks in place
+- ✅ 100% backward compatibility ensured
 
 **Phase 1 Exit Criteria:**
 
-- All tests passing (inkl. Backward-Compat)
+- All tests passing (including backward-compat)
 - Code coverage >80%
 - No global state variables
 - Circuit breaker functional
@@ -2276,74 +2276,74 @@ else:
 
 ---
 
-### Phase 2: Async Migration (Wochen 5-10) - Performance
+### Phase 2: Async Migration (Weeks 5-10) - Performance
 
 **Status: 95% Complete (Core Implementation Done) ✅**
 **Last Updated: 2026-01-20**
 
 #### 2.1 Async Modbus Client
 
-- [x] ✅ PyModbus 3.x Integration
+- [x] ✅ PyModbus 3.x integration
 
-  - [x] ✅ `AsyncModbusClient` Klasse erstellen
-  - [x] ✅ `AsyncModbusTcpClient` von pymodbus verwenden
-  - [x] ✅ Async connect/disconnect implementieren
+  - [x] ✅ Create `AsyncModbusClient` class
+  - [x] ✅ Use `AsyncModbusTcpClient` from pymodbus
+  - [x] ✅ Implement async connect/disconnect
   - [x] ✅ Async read_holding_registers
   - [x] ✅ Async register_group reads
-  - [x] ✅ Circuit Breaker Integration
-  - [x] ✅ Retry Strategy Integration
-  - [x] ✅ Timeout handling mit `asyncio.timeout()`
-  - [x] ✅ Error propagation zu typed exceptions
-  - [x] ✅ Unit tests mit pytest-asyncio (14/15 passing)
-  - [x] ✅ Integration tests mit fake Modbus server
+  - [x] ✅ Circuit breaker integration
+  - [x] ✅ Retry strategy integration
+  - [x] ✅ Timeout handling with `asyncio.timeout()`
+  - [x] ✅ Error propagation to typed exceptions
+  - [x] ✅ Unit tests with pytest-asyncio (14/15 passing)
+  - [x] ✅ Integration tests with fake Modbus server
 
-- [x] ✅ Concurrent Register Reads
-  - [x] ✅ `asyncio.gather()` für parallele Reads
+- [x] ✅ Concurrent register reads
+  - [x] ✅ `asyncio.gather()` for parallel reads
   - [x] ✅ Priority-based scheduling (BASE > EXTENDED > STATS)
   - [x] ✅ Timeout per register group
   - [x] ✅ Partial failure handling
 
 #### 2.2 Async MQTT Client
 
-- [x] ✅ aiomqtt Integration
+- [x] ✅ aiomqtt integration
 
-  - [x] ✅ `AsyncMqttClient` Klasse erstellen
-  - [x] ✅ `aiomqtt.Client` wrapper implementieren
+  - [x] ✅ Create `AsyncMqttClient` class
+  - [x] ✅ Implement `aiomqtt.Client` wrapper
   - [x] ✅ Context manager support (`async with`)
   - [x] ✅ Async connect/disconnect
-  - [x] ✅ Async publish mit QoS
+  - [x] ✅ Async publish with QoS
   - [x] ✅ Async subscribe
   - [x] ✅ Message callback handling
-  - [x] ✅ Reconnection mit exponential backoff
+  - [x] ✅ Reconnection with exponential backoff
   - [x] ✅ Last Will and Testament
   - [x] ✅ Connection state tracking
   - [x] ✅ Unit tests (14/14 passing)
-  - [x] ✅ Integration tests mit MQTT broker
+  - [x] ✅ Integration tests with MQTT broker
 
-- [ ] 🟡 Publish Queue Management (Optional - Future Enhancement)
-  - [ ] ⬜ `asyncio.Queue` für publish buffer
+- [ ] 🟡 Publish queue management (optional - future enhancement)
+  - [ ] ⬜ `asyncio.Queue` for publish buffer
   - [ ] ⬜ Batch publishing (optional)
   - [x] ✅ QoS handling (implemented)
   - [ ] ⬜ Failed message retry (handled by circuit breaker)
 
 #### 2.3 Async Coordinator
 
-- [x] ✅ AsyncMtecCoordinator Implementierung
+- [x] ✅ AsyncMtecCoordinator implementation
 
-  - [x] ✅ `AsyncMtecCoordinator` Klasse
-  - [x] ✅ Async `__init__` mit async context managers
-  - [x] ✅ Async `run()` mit `asyncio.TaskGroup`
+  - [x] ✅ `AsyncMtecCoordinator` class
+  - [x] ✅ Async `__init__` with async context managers
+  - [x] ✅ Async `run()` with `asyncio.TaskGroup`
   - [x] ✅ Task: `_poll_base_registers()`
   - [x] ✅ Task: `_poll_secondary_registers()` (round-robin)
   - [x] ✅ Task: `_poll_statistics()`
   - [x] ✅ Task: `_health_check_loop()`
-  - [x] ✅ Graceful shutdown mit task cancellation
-  - [x] ✅ Error handling per task
+  - [x] ✅ Graceful shutdown with task cancellation
+  - [x] ✅ Per-task error handling
   - [x] ✅ Unit tests (mocked initialization)
   - [x] ✅ Integration tests (7/7 passing)
 
-- [x] ✅ Sync Wrapper (Backward Compatibility)
-  - [x] ✅ `SyncMtecCoordinatorWrapper` als Facade
+- [x] ✅ Sync wrapper (backward compatibility)
+  - [x] ✅ `SyncMtecCoordinatorWrapper` as facade
   - [x] ✅ `asyncio.run()` in sync `run()` method
   - [x] ✅ Signal handling bridge
   - [x] ✅ API compatibility maintained
@@ -2351,16 +2351,16 @@ else:
 
 #### 2.4 Event Bus
 
-- [ ] 🟡 Event-Driven Architecture
+- [ ] 🟡 Event-driven architecture
   - [ ] ⬜ `Event` base dataclass
-  - [ ] ⬜ Event types definieren (ModbusDataReceivedEvent, etc.)
-  - [ ] ⬜ `EventBus` Klasse mit pub/sub
+  - [ ] ⬜ Define event types (ModbusDataReceivedEvent, etc.)
+  - [ ] ⬜ `EventBus` class with pub/sub
   - [ ] ⬜ Async event publishing
   - [ ] ⬜ Async event handlers
   - [ ] ⬜ Event subscription management
-  - [ ] ⬜ Integration mit Modbus client (publish events)
-  - [ ] ⬜ Integration mit MQTT client (subscribe to events)
-  - [ ] ⬜ Metrics collector als event subscriber
+  - [ ] ⬜ Integration with Modbus client (publish events)
+  - [ ] ⬜ Integration with MQTT client (subscribe to events)
+  - [ ] ⬜ Metrics collector as event subscriber
   - [ ] ⬜ Unit tests
   - [ ] ⬜ Performance tests (event throughput)
 
@@ -2371,7 +2371,7 @@ else:
   - [ ] ⬜ Throughput measurement (registers/second)
   - [ ] ⬜ CPU usage profiling
   - [ ] ⬜ Memory usage profiling
-  - [ ] ⬜ Comparison: Sync vs Async
+  - [ ] ⬜ Comparison: sync vs async
   - [ ] ⬜ Target: 50%+ improvement
   - [ ] ⬜ Stress tests (high frequency polling)
   - [ ] ⬜ Stability tests (24h continuous run)
@@ -2381,8 +2381,8 @@ else:
 - ✅ Non-blocking I/O operations
 - ✅ Concurrent register reads
 - ✅ Event-driven architecture
-- ✅ Sync facade erhält API-Kompatibilität
-- ✅ 50%+ Performance-Verbesserung
+- ✅ Sync facade preserves API compatibility
+- ✅ 50%+ performance improvement
 
 **Phase 2 Exit Criteria:**
 
@@ -2394,55 +2394,55 @@ else:
 
 ---
 
-### Phase 3: Architecture Modernization (Wochen 11-14)
+### Phase 3: Architecture Modernization (Weeks 11-14)
 
 #### 3.1 Dependency Injection
 
-- [ ] 🟡 Protocol-based Abstractions
+- [ ] 🟡 Protocol-based abstractions
 
-  - [ ] ⬜ `ModbusClientProtocol` definieren
-  - [ ] ⬜ `MqttClientProtocol` definieren
-  - [ ] ⬜ `ConfigProviderProtocol` definieren
-  - [ ] ⬜ `HealthMonitorProtocol` definieren
-  - [ ] ⬜ Concrete implementations umschreiben
-  - [ ] ⬜ Runtime type checking mit `@runtime_checkable`
+  - [ ] ⬜ Define `ModbusClientProtocol`
+  - [ ] ⬜ Define `MqttClientProtocol`
+  - [ ] ⬜ Define `ConfigProviderProtocol`
+  - [ ] ⬜ Define `HealthMonitorProtocol`
+  - [ ] ⬜ Rewrite concrete implementations
+  - [ ] ⬜ Runtime type checking with `@runtime_checkable`
 
-- [ ] 🟡 Service Container
-  - [ ] ⬜ `ServiceContainer` Klasse
+- [ ] 🟡 Service container
+  - [ ] ⬜ `ServiceContainer` class
   - [ ] ⬜ Singleton registration
   - [ ] ⬜ Factory registration
   - [ ] ⬜ Service resolution
   - [ ] ⬜ `create_container()` factory function
-  - [ ] ⬜ Integration mit Coordinator
+  - [ ] ⬜ Integration with coordinator
   - [ ] ⬜ Unit tests
   - [ ] ⬜ Testing utilities (mock container)
 
 #### 3.2 Register Configuration
 
-- [ ] 🟡 JSON Schema Validation
+- [ ] 🟡 JSON schema validation
 
   - [ ] ⬜ `RegisterDefinition` Pydantic model
   - [ ] ⬜ `HassConfig` Pydantic model
   - [ ] ⬜ `CalculatedRegister` Pydantic model
   - [ ] ⬜ `RegisterMap` Pydantic model
-  - [ ] ⬜ Validation für register addresses
-  - [ ] ⬜ Validation für MQTT names
+  - [ ] ⬜ Validation for register addresses
+  - [ ] ⬜ Validation for MQTT names
   - [ ] ⬜ Schema documentation
   - [ ] ⬜ Migration tool (old YAML → new schema)
 
-- [ ] 🟡 Calculated Register Engine
+- [ ] 🟡 Calculated register engine
 
-  - [ ] ⬜ `FormulaEvaluator` Klasse
+  - [ ] ⬜ `FormulaEvaluator` class
   - [ ] ⬜ AST-based safe evaluation
   - [ ] ⬜ Allowed operators (add, sub, mul, div)
   - [ ] ⬜ Allowed functions (max, min, abs, round)
   - [ ] ⬜ Dependency resolution
   - [ ] ⬜ Circular dependency detection
-  - [ ] ⬜ `CalculatedRegisterProcessor` Klasse
+  - [ ] ⬜ `CalculatedRegisterProcessor` class
   - [ ] ⬜ Formula tests (unit + integration)
-  - [ ] ⬜ Migration: Hard-coded formulas → YAML
+  - [ ] ⬜ Migration: hard-coded formulas → YAML
 
-- [ ] 🟡 Register Processor Registry
+- [ ] 🟡 Register processor registry
   - [ ] ⬜ `RegisterProcessor` Protocol
   - [ ] ⬜ `RegisterRegistry` generic class
   - [ ] ⬜ Processor implementations (Temperature, Equipment, etc.)
@@ -2453,11 +2453,11 @@ else:
 
 #### 3.3 Testing Infrastructure
 
-- [ ] 🟡 Test Utilities
+- [ ] 🟡 Test utilities
   - [ ] ⬜ Fake Modbus client
   - [ ] ⬜ Fake MQTT client
   - [ ] ⬜ Fake config provider
-  - [ ] ⬜ Test fixtures für DI container
+  - [ ] ⬜ Test fixtures for DI container
   - [ ] ⬜ Async test helpers
   - [ ] ⬜ Integration test framework
   - [ ] ⬜ Coverage target: >85%
@@ -2466,8 +2466,8 @@ else:
 
 - ✅ Protocol-based abstractions
 - ✅ DI container operational
-- ✅ Register validation mit Pydantic
-- ✅ Calculated registers deklarativ in YAML
+- ✅ Register validation with Pydantic
+- ✅ Calculated registers declarative in YAML
 - ✅ Test coverage >85%
 
 **Phase 3 Exit Criteria:**
@@ -2480,12 +2480,12 @@ else:
 
 ---
 
-### Phase 4: Observability & Operations (Wochen 15-17)
+### Phase 4: Observability & Operations (Weeks 15-17)
 
 #### 4.1 Prometheus Metrics
 
-- [ ] 🟡 Metrics Implementation
-  - [ ] ⬜ `Metrics` Klasse mit prometheus_client
+- [ ] 🟡 Metrics implementation
+  - [ ] ⬜ `Metrics` class with prometheus_client
   - [ ] ⬜ Counter: `modbus_reads_total` (by group, status)
   - [ ] ⬜ Counter: `mqtt_publishes_total` (by topic, status)
   - [ ] ⬜ Counter: `errors_total` (by component, type)
@@ -2497,25 +2497,25 @@ else:
   - [ ] ⬜ Histogram: `modbus_read_duration_seconds`
   - [ ] ⬜ Histogram: `mqtt_publish_duration_seconds`
   - [ ] ⬜ HTTP endpoint `/metrics`
-  - [ ] ⬜ Integration mit allen clients
+  - [ ] ⬜ Integration with all clients
   - [ ] ⬜ Documentation
 
 #### 4.2 Structured Logging
 
-- [ ] 🟡 Logging Infrastructure
-  - [ ] ⬜ `StructuredLogger` Klasse
+- [ ] 🟡 Logging infrastructure
+  - [ ] ⬜ `StructuredLogger` class
   - [ ] ⬜ JSON output format
   - [ ] ⬜ Log levels (INFO, WARNING, ERROR)
   - [ ] ⬜ Contextual fields (component, operation, duration)
   - [ ] ⬜ Correlation IDs (optional)
-  - [ ] ⬜ Integration in alle Module
+  - [ ] ⬜ Integration into all modules
   - [ ] ⬜ Log aggregation setup (optional)
 
 #### 4.3 Monitoring & Alerting
 
-- [ ] 🟡 Grafana Dashboard
+- [ ] 🟡 Grafana dashboard
 
-  - [ ] ⬜ Dashboard template erstellen
+  - [ ] ⬜ Create dashboard template
   - [ ] ⬜ Panel: Connection status
   - [ ] ⬜ Panel: Error rate
   - [ ] ⬜ Panel: Read latency
@@ -2524,7 +2524,7 @@ else:
   - [ ] ⬜ Panel: System health
   - [ ] ⬜ Documentation
 
-- [ ] 🟡 Alerting Rules
+- [ ] 🟡 Alerting rules
   - [ ] ⬜ Alert: Modbus disconnected >5min
   - [ ] ⬜ Alert: MQTT disconnected >2min
   - [ ] ⬜ Alert: Error rate >10/min
@@ -2534,7 +2534,7 @@ else:
 
 #### 4.4 Documentation
 
-- [ ] 🟠 Technical Documentation
+- [ ] 🟠 Technical documentation
   - [ ] ⬜ Architecture Decision Records (ADRs)
   - [ ] ⬜ API documentation
   - [ ] ⬜ Deployment guide
@@ -2562,29 +2562,29 @@ else:
 
 ---
 
-### Continuous Tasks (Alle Phasen)
+### Continuous Tasks (All Phases)
 
 #### Code Quality
 
-- [ ] 🟡 Linting & Formatting
-  - [ ] ⬜ ruff konfiguriert und aktiv
+- [ ] 🟡 Linting & formatting
+  - [ ] ⬜ ruff configured and active
   - [ ] ⬜ mypy strict mode
-  - [ ] ⬜ pylint ohne Fehler
-  - [ ] ⬜ Pre-commit hooks aktiv
+  - [ ] ⬜ pylint without errors
+  - [ ] ⬜ Pre-commit hooks active
   - [ ] ⬜ CI/CD enforcement
 
 #### Testing
 
-- [ ] 🟠 Test Coverage
+- [ ] 🟠 Test coverage
   - [ ] ⬜ Unit tests: >90% coverage
-  - [ ] ⬜ Integration tests vorhanden
+  - [ ] ⬜ Integration tests in place
   - [ ] ⬜ Backward-compat tests passing
   - [ ] ⬜ Performance tests passing
   - [ ] ⬜ CI/CD integration
 
 #### Security
 
-- [ ] 🟡 Security Checks
+- [ ] 🟡 Security checks
   - [ ] ⬜ Dependency scanning (Snyk/Dependabot)
   - [ ] ⬜ SAST tools (bandit)
   - [ ] ⬜ Secrets scanning
@@ -2594,7 +2594,7 @@ else:
 
 ### Progress Tracking Template
 
-**Weekly Update Format:**
+**Weekly update format:**
 
 ```markdown
 ## Week [X] - [Date Range]
@@ -3273,7 +3273,7 @@ Phase 2 provides a solid async foundation. Phase 3 (Architecture Modernization) 
 
 ---
 
-**Ende der Architektur-Analyse**
+**End of architecture analysis**
 
 _Phase 1: Complete ✅ | Phase 2: Complete ✅ | Phase 3: Complete ✅ | All Phases Production Ready!_ 🚀
 

@@ -40,6 +40,8 @@ from aiomtec2mqtt.resilience import (
     ExponentialBackoff,
 )
 
+__all__ = ["AsyncMqttClient"]
+
 DEFAULT_RETAIN: bool = False
 _LOGGER: Final = logging.getLogger(__name__)
 

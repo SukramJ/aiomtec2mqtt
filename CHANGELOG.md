@@ -5,6 +5,172 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-04-19
+
+This release marks the project reaching parity with the
+[`aiohomematic`](https://github.com/SukramJ/aiohomematic) quality bar
+across architecture, tests, CI/CD, security, documentation, and
+release automation (full audit trail in
+`docs/developer-guide/quality-roadmap.md`, 68 / 68 closed). The minor
+version jump reflects the breadth of additive changes; no runtime
+breaking changes for end-users.
+
+### Added — Architecture
+
+- **Sub-package layout**: re-export packages `client/`, `model/`,
+  `coordinator/`, `integrations/`, `support/`, `interfaces/` provide a
+  stable public surface; the flat module layout remains available for
+  backward compatibility.
+- **`CoordinatorConfig` builder** (`aiomtec2mqtt/coordinator_config.py`):
+  fluent assembly of coordinator dependencies, analogous to
+  `CentralConfigBuilder` in `aiohomematic`.
+- **Decorator layer** (`aiomtec2mqtt/decorators/`): `@retry`,
+  `@measure`, `@callback` — all sync/async aware, layered on top of
+  `resilience.ExponentialBackoff`.
+- **Protocol interfaces** (`aiomtec2mqtt/interfaces/`):
+  `ModbusClientProtocol`, `MqttClientProtocol`, `CoordinatorProtocol`
+  re-exported for downstream typing.
+
+### Added — Tests
+
+- **Replay framework** (`aiomtec2mqtt/session_replay.py`):
+  `SessionRecorder` wraps any pymodbus-style transport and captures
+  successful reads into ZIP-packaged frames; `SessionPlayer` is a
+  pymodbus-compatible replacement for offline replay.
+- **`aiomtec2mqtt-test-support` companion package**: standalone
+  distribution under `test_support/` with src-layout, pytest plugin
+  auto-registered via `pytest11` entry point. Public surface:
+  `transports`, `fakes`, `fixtures`, `assertions`.
+- **Mock Modbus server** (`aiomtec2mqtt/mock_modbus_server.py`) for
+  integration tests without real hardware.
+- **Contract tests**: `registers.yaml` ↔ `register_models.py`
+  completeness/types/addresses verification.
+- **Benchmarks** (`tests/test_benchmarks.py`): opt-in via
+  `pytest -p no:xdist -m benchmark`, covers `_format_value`,
+  `_process_register_value`, `_convert_code`, JSON dumps/loads.
+- **Test count grew from 243 → 600** (focus on `async_coordinator`,
+  `hass_int`, decorators, replay, mock server, contracts).
+
+### Added — CI/CD
+
+- **Release-Please** (`release-please.yml`,
+  `release-please-config.json`, `.release-please-manifest.json`)
+  for automatic version bumping on merges; `release-on-tag.yml`
+  carries a skip-guard to avoid duplicate releases.
+- **Release Drafter** (`.github/release-drafter.yml`) keeps the draft
+  release + resolved version in sync on every merge.
+- **Test matrix**: `ubuntu-latest` + `macos-latest` × Python 3.13 /
+  3.14, plus an `ubuntu-latest` / `3.14t` (free-threaded) experimental
+  entry, and an `ubuntu-24.04-arm` / 3.13 entry covering Raspberry Pi
+  4+ and current Synology NAS units.
+- **`codecov.yml`** with component tracking (coordinator, modbus,
+  mqtt, hass, resilience) and coverage gate (`fail_under = 85`).
+- **`pip-audit` workflow** (`.github/workflows/security.yml`) for
+  weekly dependency CVE scans.
+- **Bandit + gitleaks + codespell + yamllint** wired into the
+  hook runner and CI.
+- **Hook runner migrated from `pre-commit` to
+  [`prek`](https://github.com/j178/prek)** — Rust-based, drop-in
+  compatible with the existing `.pre-commit-config.yaml`, no hook
+  changes required. CI workflow renamed to
+  `.github/workflows/prek.yml`.
+
+### Added — Security & release
+
+- **CycloneDX SBOM** generated in `python-publish.yml`, attached to
+  every GitHub Release (JSON + XML).
+- **Sigstore signing** of wheels/sdists via
+  `sigstore/gh-action-sigstore-python`; `.sigstore.json` bundles
+  attached to the Release; verification recipe documented in
+  `SECURITY.md`.
+- **Dual-package release pipeline**: `python-publish.yml` rebuilds
+  with a 2-entry matrix that publishes, signs, and SBOMs both
+  `aiomtec2mqtt` and `aiomtec2mqtt-test-support` in lockstep, with
+  PyPI Trusted-Publishing.
+- **Container image on GHCR** (`ghcr.io/sukramj/aiomtec2mqtt`):
+  multi-stage `Dockerfile` (slim runtime, non-root `mtec` user UID
+  1000, `/config` volume); `docker-publish.yml` builds
+  `linux/amd64` + `linux/arm64` via buildx, tags `latest` / `<major>` /
+  `<minor>` / `<version>` / `edge`, attaches provenance + SBOM.
+- **Pydantic config validation** (`aiomtec2mqtt/config_schema.py`)
+  for every field, not only register models.
+- **Env-variable overrides** for every credential
+  (`MTEC_MQTT_PASSWORD`, `MTEC_MODBUS_IP`, …) plus an `.env.example`.
+- **`SECURITY.md`** with reporting path + supported-versions matrix.
+
+### Added — Documentation
+
+- **MkDocs Material site** (`mkdocs.yml`) with Pages deploy via
+  `docs.yml`; user guide, developer guide, reference sections.
+- **Architecture Decision Records**:
+  - ADR-001: Keep `ServiceContainer` alongside constructor injection.
+  - ADR-002: Resilience design (backoff + circuit breaker).
+  - ADR-003: Async migration to `asyncio.TaskGroup`.
+  - ADR-004: Builder pattern for `CoordinatorConfig`.
+  - ADR-005: No separate `aiomtec2mqtt_storage` package.
+  - ADR-006: Defer Python 3.14 floor until Debian stable ships it.
+- **Migration guide** (`docs/user-guide/migration.md`).
+- **Glossary** (`docs/reference/glossary.md`).
+- **Auto-generated register reference** from `registers.yaml`
+  (`script/gen_register_reference.py`).
+- **Quality Roadmap** moved to
+  `docs/developer-guide/quality-roadmap.md` and reframed as the
+  audit-trail / next-realignment anchor.
+
+### Changed
+
+- **`hass_int.py`**: switched from stdlib `json.dumps` to the
+  `aiomtec2mqtt._json` wrapper — `orjson` fast-path activates
+  automatically when the `[fast]` extra is installed; transparent
+  stdlib fallback otherwise.
+- **`requirements.txt`** is now generated reproducibly via
+  `uv pip compile` from `pyproject.toml`
+  (`script/compile-requirements.sh`).
+- **Mypy config** consolidated from `setup.cfg` / `mypy.ini` into
+  `pyproject.toml` `[tool.mypy]`; `warn_unreachable` and
+  `warn_return_any` enabled.
+- **Ruff** rules expanded (FLY, INP, PYI, SLOT, TRY, D), per-file
+  ignores for tests and scripts; line length pinned to 99 (rationale
+  in CLAUDE.md).
+- **`sync_coordinator_wrapper.py`** carries a deprecation warning;
+  removal is staged for a future major release.
+
+### Added — Optional extras
+
+- **`[fast]` extra** installs `orjson>=3.10` for the JSON fast path.
+  The library falls back to stdlib `json` transparently when not
+  installed (also covers free-threaded 3.14t where `orjson` has no
+  wheels yet).
+
+### Infrastructure
+
+- 600 tests passing (xdist `-n auto --dist loadscope`); branch
+  coverage enabled with a `fail_under = 85` gate.
+- All hooks green via `prek` (ruff, mypy, pylint, bandit, codespell,
+  yamllint, gitleaks, sort-class-members, kwonly-lint,
+  python-typing-update).
+- McCabe complexity capped at 25 in CI.
+
+### Migration notes
+
+- No runtime API changes for end-users; existing `config.yaml` files
+  continue to work.
+- Downstream projects can now depend on
+  `aiomtec2mqtt-test-support>=1.1` to get fixtures/fakes/replay
+  helpers without copy-pasting from `tests/`. The package version
+  tracks `aiomtec2mqtt` exactly.
+- Container users can pull `ghcr.io/sukramj/aiomtec2mqtt:1.1.0`,
+  `:1.1`, `:1`, or `:latest` (multi-arch amd64/arm64).
+- `sync_coordinator_wrapper.py` emits a deprecation warning — plan
+  migration to `async_coordinator.AsyncMtecCoordinator` ahead of the
+  next major release.
+- Contributors: replace any local `pre-commit install` with
+  `prek install`. The `.pre-commit-config.yaml` filename is kept so
+  existing tooling that scans for it (IDE integrations, hosted Git
+  services) keeps working unchanged.
+
+---
+
 ## [1.0.5] - 2026-01-21
 
 ### Removed
@@ -504,6 +670,7 @@ See `ARCHITECTURE.md` for complete migration guide and roadmap.
 - Systemd service installation script
 - Documentation and examples
 
+[1.1.0]: https://github.com/sukramj/aiomtec2mqtt/compare/v1.0.5..v1.1.0
 [1.0.5]: https://github.com/sukramj/aiomtec2mqtt/compare/v1.0.4..v1.0.5
 [1.0.4]: https://github.com/sukramj/aiomtec2mqtt/compare/v1.0.3..v1.0.4
 [1.0.3]: https://github.com/sukramj/aiomtec2mqtt/compare/v1.0.2..v1.0.3

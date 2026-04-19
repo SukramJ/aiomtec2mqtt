@@ -94,14 +94,14 @@ ruff check aiomtec2mqtt/
 pylint aiomtec2mqtt/
 ```
 
-### Pre-commit Hooks
+### prek Hooks
 
 ```bash
-# Install pre-commit hooks
-pre-commit install
+# Install Git hooks (reads .pre-commit-config.yaml)
+prek install
 
 # Run manually
-pre-commit run --all-files
+prek run --all-files
 ```
 
 ## Configuration
@@ -196,10 +196,30 @@ tests/
 
 ### Style Guidelines
 
-- Line length: 99 characters
+- **Line length: 99 characters** (see rationale below)
 - Python 3.13+ type hints required
 - Use `from __future__ import annotations`
 - Follow PEP 484 for type annotations
+- Docstrings: **Google-style** (enforced by ruff `D` rules)
+
+### Line-length decision (99)
+
+Chosen value: **99** (not 88/black-default, not 120).
+
+Rationale:
+
+- **Side-by-side diffs** fit on a 1920×1080 display without wrapping
+  (~100 columns/pane at common font sizes).
+- **99 matches Home Assistant Core** and several Anthropic/PSF projects,
+  reducing cognitive load for contributors who also work on those.
+- **120 is too wide** for GitHub's default PR-review column width, causing
+  horizontal scroll during reviews.
+- **88 (black default) is too narrow** for the register-heavy code in this
+  project where names like `ModbusConnectionError`, `RegisterProcessorRegistry`
+  frequently co-occur on one line.
+
+Enforced by `ruff` (`line-length = 99`) and pylint
+(`max-line-length-suggestions = 99`). Do not override per-file.
 
 ## Deployment
 

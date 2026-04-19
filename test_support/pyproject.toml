@@ -1,0 +1,46 @@
+[build-system]
+requires      = ["setuptools>=80.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name        = "aiomtec2mqtt-test-support"
+version     = "1.1.0"  # x-release-please-version
+license     = {file = "LICENSE"}
+description = "Reusable pytest fixtures, fakes, and replay helpers for projects integrating with aiomtec2mqtt"
+authors     = [
+    {name = "SukramJ", email = "sukramj@icloud.com"},
+]
+keywords    = ["aiomtec2mqtt", "testing", "pytest", "fixtures", "modbus", "mqtt"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: Pytest",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: GNU Library or Lesser General Public License (LGPL)",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Testing",
+]
+readme          = "README.md"
+requires-python = ">=3.13.0"
+# Pin to the same major as the project we test against. Bump deliberately when
+# the upstream API changes so users get a clear failure rather than silent
+# incompatibility.
+dependencies    = [
+    "aiomtec2mqtt>=1.1.0,<2",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+]
+
+[project.urls]
+"Source Code" = "https://github.com/sukramj/aiomtec2mqtt"
+"Bug Reports" = "https://github.com/sukramj/aiomtec2mqtt/issues"
+
+[project.entry-points.pytest11]
+aiomtec2mqtt_test_support = "aiomtec2mqtt_test_support.fixtures"
+
+[tool.setuptools.packages.find]
+where   = ["src"]
+include = ["aiomtec2mqtt_test_support*"]
+
+[tool.setuptools.package-data]
+aiomtec2mqtt_test_support = ["py.typed"]

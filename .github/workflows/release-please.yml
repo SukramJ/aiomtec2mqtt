@@ -1,0 +1,33 @@
+# Release-Please keeps a draft release PR open on main. When merged, it
+# bumps the package version, updates CHANGELOG.md, creates the git tag,
+# and publishes a GitHub Release. The tag push then triggers the existing
+# release-on-tag → python-publish → sigstore-sign chain.
+#
+# Driven by Conventional Commits (feat:, fix:, BREAKING CHANGE:, etc.).
+
+name: Release Please
+
+# yamllint disable-line rule:truthy
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-please-${{ github.ref }}
+  cancel-in-progress: false # never cancel a running release PR update
+
+jobs:
+  release-please:
+    if: github.repository_owner == 'SukramJ'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run Release Please
+        uses: googleapis/release-please-action@v4
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+          token: ${{ secrets.GITHUB_TOKEN }}

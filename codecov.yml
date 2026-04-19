@@ -1,0 +1,64 @@
+codecov:
+  require_ci_to_pass: true
+
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 0.5%
+        informational: false
+    patch:
+      default:
+        target: auto
+        threshold: 0.05%
+        informational: false
+
+comment:
+  layout: "header, diff, flags, components, files"
+  behavior: default
+  require_changes: false
+
+component_management:
+  default_rules:
+    statuses:
+      - type: project
+        target: auto
+  individual_components:
+    - component_id: coordinator
+      name: Coordinator
+      paths:
+        - aiomtec2mqtt/async_coordinator.py
+        - aiomtec2mqtt/sync_coordinator_wrapper.py
+    - component_id: modbus
+      name: Modbus
+      paths:
+        - aiomtec2mqtt/async_modbus_client.py
+    - component_id: mqtt
+      name: MQTT
+      paths:
+        - aiomtec2mqtt/async_mqtt_client.py
+    - component_id: hass
+      name: Home Assistant
+      paths:
+        - aiomtec2mqtt/hass_int.py
+    - component_id: resilience
+      name: Resilience
+      paths:
+        - aiomtec2mqtt/resilience.py
+        - aiomtec2mqtt/health.py
+        - aiomtec2mqtt/shutdown.py
+    - component_id: model
+      name: Register Models
+      paths:
+        - aiomtec2mqtt/register_models.py
+        - aiomtec2mqtt/register_processors.py
+        - aiomtec2mqtt/formula_evaluator.py
+
+ignore:
+  - "tests/**"
+  - "script/**"
+  - "aiomtec2mqtt/util/**"
+  - "aiomtec2mqtt/install.py"
+  - "aiomtec2mqtt/config.py"
+  - "aiomtec2mqtt/testing.py"

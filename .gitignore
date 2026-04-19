@@ -6,6 +6,7 @@ __pycache__/
 # Private config file
 /config.yaml
 /evcc.yaml
+/.env
 
 # others
 .vscode/launch.json
@@ -15,3 +16,4 @@ __pycache__/
 /.idea
 .coverage
 /aiomtec2mqtt.egg-info
+/site

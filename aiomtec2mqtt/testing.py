@@ -23,6 +23,14 @@ from aiomtec2mqtt.protocols import (
 )
 from aiomtec2mqtt.resilience import ConnectionState
 
+__all__ = [
+    "FakeConfigProvider",
+    "FakeHealthMonitor",
+    "FakeModbusClient",
+    "FakeMqttClient",
+    "create_test_container",
+]
+
 
 class FakeModbusClient:
     """Fake Modbus client for testing."""

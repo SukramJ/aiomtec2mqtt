@@ -16,6 +16,13 @@ from enum import Enum
 import logging
 from typing import Any, Final
 
+__all__ = [
+    "ComponentHealth",
+    "HealthCheck",
+    "HealthStatus",
+    "SystemHealth",
+]
+
 _LOGGER: Final = logging.getLogger(__name__)
 
 

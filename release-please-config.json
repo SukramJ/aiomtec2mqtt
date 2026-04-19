@@ -1,0 +1,30 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "python",
+  "include-component-in-tag": false,
+  "tag-separator": "v",
+  "bump-minor-pre-major": true,
+  "bump-patch-for-minor-pre-major": false,
+  "draft": false,
+  "prerelease": false,
+  "packages": {
+    ".": {
+      "package-name": "aiomtec2mqtt",
+      "changelog-path": "CHANGELOG.md",
+      "extra-files": [
+        {
+          "type": "generic",
+          "path": "aiomtec2mqtt/__init__.py"
+        },
+        {
+          "type": "generic",
+          "path": "test_support/pyproject.toml"
+        },
+        {
+          "type": "generic",
+          "path": "test_support/src/aiomtec2mqtt_test_support/__init__.py"
+        }
+      ]
+    }
+  }
+}

@@ -31,7 +31,22 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v6
 
+      - name: Skip if Release already exists (e.g. created by Release Please)
+        id: existing
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          if gh release view "${GITHUB_REF_NAME}" --repo "${GITHUB_REPOSITORY}" \
+              --json tagName --jq .tagName >/dev/null 2>&1; then
+            echo "Release for tag ${GITHUB_REF_NAME} already exists — skipping."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Determine version from tag
+        if: steps.existing.outputs.skip != 'true'
         id: vars
         run: |
           TAG_NAME="${GITHUB_REF_NAME}"
@@ -43,6 +58,7 @@ jobs:
 
       - name: Extract release notes from CHANGELOG.md
         id: notes
+        if: steps.existing.outputs.skip != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -98,6 +114,7 @@ jobs:
           echo "==============================="
 
       - name: Create GitHub Release
+        if: steps.existing.outputs.skip != 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.TAG_NAME }}
@@ -110,6 +127,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Trigger python-publish workflow
+        if: steps.existing.outputs.skip != 'true'
         run: |
           set -euo pipefail
           REPO="${GITHUB_REPOSITORY}"

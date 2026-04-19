@@ -12,14 +12,16 @@ command topics for controllable entities.
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import TYPE_CHECKING, Any, Final, Protocol
 
+from aiomtec2mqtt._json import dumps as _json_dumps
 from aiomtec2mqtt.const import HA, MTEC_PREFIX, HAPlatform, Register
 
 if TYPE_CHECKING:
     pass
+
+__all__ = ["HassIntegration", "MqttClientProtocol"]
 
 
 class MqttClientProtocol(Protocol):
@@ -147,7 +149,7 @@ class HassIntegration:
             data_item[HA.PAYLOAD_OFF] = hass_payload_off
 
         topic = f"{self._hass_base_topic}/{HAPlatform.BINARY_SENSOR}/{unique_id}/config"
-        self._devices_array.append((topic, json.dumps(data_item), None))
+        self._devices_array.append((topic, _json_dumps(data_item), None))
 
     def _append_number(self, *, item: dict[str, Any]) -> None:
         group = item[Register.GROUP]
@@ -173,7 +175,7 @@ class HassIntegration:
             data_item[HA.DEVICE_CLASS] = hass_device_class
 
         topic = f"{self._hass_base_topic}/{HAPlatform.NUMBER}/{unique_id}/config"
-        self._devices_array.append((topic, json.dumps(data_item), command_topic))
+        self._devices_array.append((topic, _json_dumps(data_item), command_topic))
 
     def _append_select(self, *, item: dict[str, Any]) -> None:
         options = item[Register.VALUE_ITEMS]
@@ -195,7 +197,7 @@ class HassIntegration:
         }
 
         topic = f"{self._hass_base_topic}/{HAPlatform.SELECT}/{unique_id}/config"
-        self._devices_array.append((topic, json.dumps(data_item), command_topic))
+        self._devices_array.append((topic, _json_dumps(data_item), command_topic))
 
     def _append_sensor(self, *, item: dict[str, Any]) -> None:
         name = item[Register.NAME]
@@ -221,7 +223,7 @@ class HassIntegration:
             data_item[HA.STATE_CLASS] = hass_state_class
 
         topic = f"{self._hass_base_topic}/{HAPlatform.SENSOR}/{unique_id}/config"
-        self._devices_array.append((topic, json.dumps(data_item), None))
+        self._devices_array.append((topic, _json_dumps(data_item), None))
 
     def _append_switch(self, *, item: dict[str, Any]) -> None:
         group = item[Register.GROUP]
@@ -248,7 +250,7 @@ class HassIntegration:
             data_item[HA.PAYLOAD_OFF] = hass_payload_off
 
         topic = f"{self._hass_base_topic}/{HAPlatform.SWITCH}/{unique_id}/config"
-        self._devices_array.append((topic, json.dumps(data_item), command_topic))
+        self._devices_array.append((topic, _json_dumps(data_item), command_topic))
 
     def _build_automation_array(self) -> None:
         # Buttons
@@ -262,7 +264,7 @@ class HassIntegration:
                 HA.UNIQUE_ID: unique_id,
             }
             topic = f"{self._hass_base_topic}/button/{unique_id}/config"
-            self._devices_array.append((topic, json.dumps(data_item), command_topic))
+            self._devices_array.append((topic, _json_dumps(data_item), command_topic))
 
     def _build_devices_array(self) -> None:
         """Build discovery data for devices."""

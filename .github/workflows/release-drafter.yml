@@ -1,0 +1,40 @@
+# This workflow keeps a draft GitHub Release up to date by aggregating
+# merged pull requests into categorised release notes, and resolves the
+# next version from PR labels (major / minor / patch).
+#
+# Behaviour:
+# - on push to main: refreshes the draft release (and bumps the resolved version)
+# - on pull_request (opened / reopened / synchronize): applies autolabels
+#   so new PRs appear in the correct category of the draft release
+#
+# The drafted release stays in "draft" state until a maintainer publishes it,
+# which pushes the tag and hands off to release-on-tag.yml → python-publish.yml.
+
+name: Release Drafter
+
+# yamllint disable-line rule:truthy
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  update_release_draft:
+    if: github.repository_owner == 'SukramJ'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Update release draft
+        uses: release-drafter/release-drafter@v6
+        with:
+          config-name: release-drafter.yml
+          disable-autolabeler: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

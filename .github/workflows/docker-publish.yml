@@ -1,0 +1,106 @@
+# Build and publish a multi-arch container image to GitHub Container Registry.
+#
+# Triggers:
+# - On `release: published` → push tags `<version>`, `<major>`, `latest`.
+# - On push to `main`         → push tag `edge` (rolling preview).
+# - On `workflow_dispatch`    → manual rebuild.
+#
+# Architectures: linux/amd64 and linux/arm64. Raspberry Pi 4+, recent Synology
+# NAS, and Apple Silicon developers all run arm64; older armv7-only boards
+# (Pi 3 and below) are out of scope — they cannot run a current Python 3.13
+# wheel cleanly anyway.
+#
+# Image: ghcr.io/sukramj/aiomtec2mqtt
+#
+# Prereqs:
+# - The repository's GHCR settings allow this workflow to push images.
+#   The default GITHUB_TOKEN with `packages: write` is enough.
+
+name: Publish container image
+
+# yamllint disable-line rule:truthy
+on:
+  release:
+    types: [published]
+  push:
+    branches: [main]
+    paths:
+      - "Dockerfile"
+      - ".dockerignore"
+      - "aiomtec2mqtt/**"
+      - "pyproject.toml"
+      - ".github/workflows/docker-publish.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write # reserved for future cosign signing
+
+concurrency:
+  group: docker-publish-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-push:
+    if: github.repository_owner == 'SukramJ'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up QEMU (for arm64 emulation)
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute image metadata (tags + labels)
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          # Tag rules:
+          # - On a release tag like v1.2.3, tag image as 1.2.3, 1.2, 1, latest
+          # - On a push to main, tag image as `edge`
+          # - On workflow_dispatch from any ref, tag with the short SHA
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=raw,value=latest,enable=${{ github.event_name == 'release' }}
+            type=raw,value=edge,enable=${{ github.ref == 'refs/heads/main' }}
+            type=sha,format=short,enable=${{ github.event_name == 'workflow_dispatch' }}
+          labels: |
+            org.opencontainers.image.title=aiomtec2mqtt
+            org.opencontainers.image.description=Read M-TEC Energybutler Modbus data, publish to MQTT
+            org.opencontainers.image.licenses=LGPL-3.0-or-later
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            VERSION=${{ steps.meta.outputs.version }}
+            VCS_REF=${{ github.sha }}
+            BUILD_DATE=${{ steps.meta.outputs.created || github.event.repository.updated_at }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: true
+          sbom: true

@@ -7,6 +7,10 @@ allowing existing code to use the new async implementation without changes.
 The wrapper uses asyncio.run() to bridge synchronous and asynchronous code,
 ensuring full API compatibility with the original MtecCoordinator.
 
+.. deprecated::
+    Scheduled for removal once no external consumers remain. Prefer
+    :class:`aiomtec2mqtt.async_coordinator.AsyncMtecCoordinator` directly.
+
 (c) 2024 by Christian Rödel
 (c) 2026 by SukramJ
 """
@@ -18,10 +22,19 @@ import logging
 import signal
 import threading
 from typing import Any, Final
+import warnings
 
 from aiomtec2mqtt.async_coordinator import AsyncMtecCoordinator
 
+__all__ = ["SyncMtecCoordinatorWrapper"]
+
 _LOGGER: Final = logging.getLogger(__name__)
+
+warnings.warn(
+    "sync_coordinator_wrapper is deprecated; use AsyncMtecCoordinator directly.",
+    DeprecationWarning,
+    stacklevel=2,
+)
 
 
 class SyncMtecCoordinatorWrapper:
