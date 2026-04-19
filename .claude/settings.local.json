@@ -1,19 +1,21 @@
 {
   "permissions": {
     "allow": [
-      "Bash(ruff check:*)",
-      "Bash(python3 -m ruff check:*)",
-      "Bash(python3:*)",
-      "Bash(python -m pytest:*)",
-      "Bash(python -m ruff check:*)",
-      "Bash(python -c:*)",
-      "Bash(git diff:*)",
-      "Bash(python -m pylint:*)",
-      "Bash(pre-commit run:*)",
-      "Bash(prek:*)",
-      "Bash(git add:*)",
-      "Bash(python -m mypy:*)",
-      "Bash(pip show:*)"
-    ]
+      "Bash(*)",
+      "Read(*)",
+      "Write(*)",
+      "Edit(*)",
+      "Glob(*)",
+      "Grep(*)",
+      "Agent(*)",
+      "WebFetch(*)",
+      "WebSearch(*)",
+      "NotebookEdit(*)",
+      "Skill(*)",
+      "TaskCreate(*)",
+      "TaskUpdate(*)",
+      "ToolSearch(*)"
+    ],
+    "deny": []
   }
 }

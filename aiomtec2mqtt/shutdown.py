@@ -16,6 +16,8 @@ import signal
 import threading
 from typing import Any, Final
 
+__all__ = ["ShutdownManager", "get_shutdown_manager"]
+
 _LOGGER: Final = logging.getLogger(__name__)
 
 

@@ -7,10 +7,15 @@ MODBUS_RETRIES: 3 # Retries
 MODBUS_FRAMER: socket # Modbus Framer (usually no change required; options: 'ascii', 'binary', 'rtu', 'socket', 'tls')
 
 # MQTT settings
+# NOTE: TLS/SSL is currently NOT supported natively (plain TCP only).
+# For TLS, either run a local broker with plain auth, or terminate TLS
+# via a reverse proxy (e.g. mosquitto with bridge). TLS support is
+# tracked in ROADMAP (P1). Credentials can also be provided via the
+# MTEC_MQTT_LOGIN / MTEC_MQTT_PASSWORD environment variables.
 MQTT_SERVER: localhost # MQTT server
-MQTT_PORT: 1883 # MQTT server port
-MQTT_LOGIN: " " # MQTT Login
-MQTT_PASSWORD: "" # MQTT Password
+MQTT_PORT: 1883 # MQTT server port (typically 1883 plain, 8883 TLS — TLS not supported)
+MQTT_LOGIN: " " # MQTT Login (override: env MTEC_MQTT_LOGIN)
+MQTT_PASSWORD: "" # MQTT Password (override: env MTEC_MQTT_PASSWORD)
 MQTT_TOPIC: MTEC # MQTT topic name
 MQTT_FLOAT_FORMAT: "{:.3f}" # Defines how to format float values
 

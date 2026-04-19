@@ -1,24 +1,17 @@
-#!/usr/bin/env sh
-set -eu
+#!/usr/bin/env bash
+# Activate the project venv (./.venv) if present, then exec the given
+# command. Used by prek hooks (mypy/pylint) so they find project deps
+# when prek is invoked outside an activated shell (e.g. as a Git
+# pre-commit hook). In CI the deps are installed directly into the
+# system Python, so missing `.venv` falls back to PATH lookup.
+set -euo pipefail
 
-export "OSTYPE"=@OSTYPE
+repo_root=$(git rev-parse --show-toplevel)
+activate="${repo_root}/.venv/bin/activate"
 
-# Activate pyenv and virtualenv if present, then run the specified command
-
-# pyenv, pyenv-virtualenv
-if [ -s .python-version ]; then
-    PYENV_VERSION=$(head -n 1 .python-version)
-    export PYENV_VERSION
+if [ -f "${activate}" ]; then
+  # shellcheck disable=SC1090
+  . "${activate}"
 fi
-
-# other common virtualenvs
-my_path=$(git rev-parse --show-toplevel)
-
-for venv in venv .venv .; do
-  if [ -f "${my_path}/${venv}/bin/activate" ]; then
-    . "${my_path}/${venv}/bin/activate"
-    break
-  fi
-done
 
 exec "$@"

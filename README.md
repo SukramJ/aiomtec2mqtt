@@ -24,7 +24,7 @@ While the original `mtec2mqtt` project works reliably, we created this fork to m
 
 - Cleaner separation of concerns (Modbus client, MQTT client, coordinator)
 - Comprehensive test suite with >85% code coverage
-- Pre-commit hooks and CI/CD integration for code quality
+- prek (pre-commit-compatible) hooks and CI/CD integration for code quality
 
 **⚡ Performance Optimizations**
 
@@ -153,6 +153,35 @@ This is all you need to do for a standard setup!
 
 ```
 pip install https://github.com/sukramj/aiomtec2mqtt/archive/refs/heads/main.zip
+```
+
+**Recommended (fast):** Use [`uv`](https://docs.astral.sh/uv/) — a drop-in
+replacement for `pip` that is 10–100× faster and produces reproducible
+lock files:
+
+```bash
+# Install uv (one-time)
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# Create venv and install aiomtec2mqtt
+uv venv
+source .venv/bin/activate
+uv pip install aiomtec2mqtt
+
+# For development (editable + test deps)
+uv pip install -e .
+uv pip install -r requirements_test.txt
+
+# Regenerate pinned requirements.txt from pyproject.toml
+uv pip compile pyproject.toml -o requirements.txt
+```
+
+`uv` is also used in CI; see `requirements_test.txt` for the pinned version.
+
+**Optional performance extras:**
+
+```bash
+uv pip install "aiomtec2mqtt[fast]"   # adds orjson for faster JSON
 ```
 
 _IMPORTANT:_ M-TEC changed their Modbus port with firmware V27.52.4.0. If you run that version or a newer one, you need to change the `MODBUS_PORT` in the `config.yaml` to 502 !

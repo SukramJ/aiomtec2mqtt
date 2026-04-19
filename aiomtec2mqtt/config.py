@@ -15,6 +15,7 @@ from typing import Any, Final, cast
 
 import yaml
 
+from aiomtec2mqtt.config_schema import ConfigValidationError, validate_config
 from aiomtec2mqtt.const import (
     CONFIG_FILE,
     CONFIG_PATH,
@@ -24,13 +25,64 @@ from aiomtec2mqtt.const import (
     ENV_XDG_CONFIG_HOME,
     FILE_REGISTERS,
     MANDATORY_PARAMETERS,
+    MTEC_PREFIX,
     OPTIONAL_PARAMETERS,
     UTF8,
     Config,
     Register,
 )
 
+__all__ = ["ConfigValidationError", "create_config_file", "init_config", "init_register_map"]
+
 _LOGGER: Final = logging.getLogger(__name__)
+
+
+def _coerce_env_value(*, raw: str) -> Any:
+    """Parse env-var string into bool/int/float/str (best-effort)."""
+    if (lowered := raw.strip().lower()) in {"true", "false"}:
+        return lowered == "true"
+    try:
+        return int(raw)
+    except ValueError:
+        pass
+    try:
+        return float(raw)
+    except ValueError:
+        pass
+    return raw
+
+
+def _apply_env_overrides(*, config: dict[str, Any]) -> dict[str, Any]:
+    """Override config values with environment variables prefixed with ``MTEC_``.
+
+    For every env var of the form ``MTEC_<KEY>`` (e.g. ``MTEC_MQTT_PASSWORD``)
+    the matching configuration key is overwritten. Values are parsed as
+    bool/int/float when possible, otherwise kept as string.
+    """
+    for env_key, env_value in os.environ.items():
+        if not env_key.startswith(MTEC_PREFIX):
+            continue
+        if not (cfg_key := env_key[len(MTEC_PREFIX) :]):
+            continue
+        config[cfg_key] = _coerce_env_value(raw=env_value)
+        _LOGGER.debug("Config override from env: %s", env_key)
+    return config
+
+
+def _finalize_config(*, config: dict[str, Any]) -> dict[str, Any]:
+    """Apply env overrides and, if the result is non-empty, run schema validation.
+
+    Keeps backwards compatibility: an empty dict (no config file found) is
+    returned unchanged instead of raising, so tooling like ``create_config_file``
+    can still execute on a fresh machine.
+    """
+    if not (merged := _apply_env_overrides(config=config)):
+        return merged
+    try:
+        return validate_config(merged)
+    except ConfigValidationError as err:
+        _LOGGER.error("Config validation failed: %s", err)
+        raise
 
 
 # Create new config file
@@ -113,14 +165,14 @@ def init_config() -> dict[str, Any]:
         with open(file=cwd_conf, encoding=UTF8) as f_conf:
             config = cast(dict[str, Any], yaml.safe_load(f_conf))
             _LOGGER.info("Using config YAML file: %s", cwd_conf)
-            return config
+            return _finalize_config(config=config)
     except OSError:
         # Not found in CWD; continue to look in user locations
         pass
     except yaml.YAMLError as err:
         # Invalid YAML in CWD: do not fall back to other locations
         _LOGGER.debug("Couldn't read config YAML file %s : %s", cwd_conf, str(err))
-        return {}
+        return _finalize_config(config={})
 
     # 2) Look in user config locations
     conf_files: list[str] = []
@@ -136,13 +188,13 @@ def init_config() -> dict[str, Any]:
             with open(file=fname_conf, encoding=UTF8) as f_conf:
                 config = cast(dict[str, Any], yaml.safe_load(f_conf))
                 _LOGGER.info("Using config YAML file: %s", fname_conf)
-                return config
+                return _finalize_config(config=config)
         except OSError as err:
             _LOGGER.debug("Couldn't open config YAML file: %s", str(err))
         except yaml.YAMLError as err:
             _LOGGER.debug("Couldn't read config YAML file %s : %s", fname_conf, str(err))
 
-    return {}
+    return _finalize_config(config={})
 
 
 def init_register_map() -> tuple[dict[str, dict[str, Any]], list[str]]:

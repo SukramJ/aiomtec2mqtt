@@ -17,6 +17,16 @@ from typing import Any, Protocol, runtime_checkable
 from aiomtec2mqtt.health import ComponentHealth, SystemHealth
 from aiomtec2mqtt.resilience import ConnectionState
 
+__all__ = [
+    "ConfigProviderProtocol",
+    "CoordinatorProtocol",
+    "FormulaEvaluatorProtocol",
+    "HealthMonitorProtocol",
+    "ModbusClientProtocol",
+    "MqttClientProtocol",
+    "RegisterProcessorProtocol",
+]
+
 
 @runtime_checkable
 class ModbusClientProtocol(Protocol):
@@ -189,6 +199,19 @@ class RegisterProcessorProtocol(Protocol):
         register_info: dict[str, Any],
     ) -> Any:
         """Process register value."""
+        ...
+
+
+@runtime_checkable
+class CoordinatorProtocol(Protocol):
+    """Protocol for the top-level coordinator that drives the polling loops."""
+
+    async def run(self) -> None:
+        """Start the main polling loop and block until shutdown is requested."""
+        ...
+
+    async def shutdown(self) -> None:
+        """Signal the coordinator to stop and wait for all tasks to finish."""
         ...
 
 

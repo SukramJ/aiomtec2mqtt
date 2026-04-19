@@ -7,5 +7,5 @@ Modbus, optional Home Assistant discovery integration, and small utilities.
 
 from __future__ import annotations
 
-__all__ = ["config", "hass_int"]
-__version__ = "1.0.6"
+__all__ = ["__version__", "config", "hass_int"]
+__version__ = "1.1.0"  # x-release-please-version

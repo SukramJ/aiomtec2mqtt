@@ -22,6 +22,13 @@ Restart=always
 WantedBy=multi-user.target
 """
 
+__all__ = [
+    "get_executable_path",
+    "install_service",
+    "main",
+    "uninstall_service",
+]
+
 SERVICE_NAME = "aiomtec2mqtt.service"
 SERVICE_PATH = Path("/etc/systemd/system") / SERVICE_NAME
 

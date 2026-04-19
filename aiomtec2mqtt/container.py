@@ -4,6 +4,25 @@ Dependency Injection container for managing service instances.
 This module provides a lightweight service container for dependency injection,
 supporting both singleton and factory registrations.
 
+Usage note (2026-04-17 evaluation — ROADMAP 1.7):
+    The production coordinator (``AsyncMtecCoordinator``) currently wires its
+    dependencies directly via constructor injection. The ``ServiceContainer``
+    is primarily used by tests (``testing.create_test_container``) and by
+    downstream integrations that want runtime-swappable services (e.g.
+    Home Assistant add-ons).
+
+    Kept because:
+      - Small footprint (~200 LoC, fully tested).
+      - Gives integrations a single hook to swap real clients for fakes
+        without monkey-patching.
+      - Mirrors the pattern used in ``aiohomematic``, so contributors familiar
+        with that codebase find a known structure.
+
+    Do **not** grow the container into a full IoC framework. For new
+    components, prefer plain factory functions and pass them to the
+    coordinator constructor. The container is a convenience, not the only
+    valid wiring strategy.
+
 (c) 2024 by Christian Rödel
 (c) 2026 by SukramJ
 """
@@ -13,6 +32,8 @@ from __future__ import annotations
 from collections.abc import Callable
 import logging
 from typing import Any, Final, TypeVar, cast
+
+__all__ = ["ServiceContainer", "create_container"]
 
 _LOGGER: Final = logging.getLogger(__name__)
 

@@ -47,6 +47,8 @@ from aiomtec2mqtt.resilience import (
     ExponentialBackoff,
 )
 
+__all__ = ["AsyncModbusClient"]
+
 _LOGGER: Final = logging.getLogger(__name__)
 
 

@@ -1,0 +1,94 @@
+site_name: aiomtec2mqtt
+site_description: Async Python bridge between M-TEC Energybutler inverters and MQTT brokers.
+site_url: https://sukramj.github.io/aiomtec2mqtt/
+repo_url: https://github.com/SukramJ/aiomtec2mqtt
+repo_name: SukramJ/aiomtec2mqtt
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  language: en
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.indexes
+    - navigation.top
+    - content.code.copy
+    - content.code.annotate
+    - content.action.edit
+    - search.suggest
+    - search.highlight
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/weather-night
+        name: Switch to light mode
+  icon:
+    repo: fontawesome/brands/github
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - tables
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+
+nav:
+  - Home: index.md
+  - User Guide:
+      - user-guide/index.md
+      - Installation: user-guide/installation.md
+      - Configuration: user-guide/configuration.md
+      - MQTT Topics: user-guide/mqtt-topics.md
+      - Home Assistant: user-guide/home-assistant.md
+      - evcc: user-guide/evcc.md
+      - Troubleshooting: user-guide/troubleshooting.md
+      - Migration: user-guide/migration.md
+  - Developer Guide:
+      - developer-guide/index.md
+      - Setup: developer-guide/setup.md
+      - Architecture: developer-guide/architecture.md
+      - Testing: developer-guide/testing.md
+      - Release Process: developer-guide/release-process.md
+      - ADR-001 ServiceContainer: developer-guide/adr-001-service-container.md
+      - ADR-002 Resilience Design: developer-guide/adr-002-resilience-design.md
+      - ADR-003 Async Migration: developer-guide/adr-003-async-migration.md
+      - ADR-004 CoordinatorConfig Builder: developer-guide/adr-004-coordinator-config-builder.md
+      - ADR-005 No Storage Package: developer-guide/adr-005-no-storage-package.md
+      - ADR-006 Defer Python 3.14 Floor: developer-guide/adr-006-defer-python-314-floor.md
+      - Quality Roadmap (history): developer-guide/quality-roadmap.md
+  - Reference:
+      - reference/index.md
+      - Registers: reference/registers.md
+      - Glossary: reference/glossary.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/SukramJ/aiomtec2mqtt

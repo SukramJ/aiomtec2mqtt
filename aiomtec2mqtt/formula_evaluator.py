@@ -16,6 +16,12 @@ import logging
 import operator
 from typing import Any, Final
 
+__all__ = [
+    "CalculatedRegisterProcessor",
+    "FormulaEvaluationError",
+    "FormulaEvaluator",
+]
+
 _LOGGER: Final = logging.getLogger(__name__)
 
 # Allowed operators
