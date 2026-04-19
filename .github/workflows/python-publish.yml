@@ -1,21 +1,20 @@
-# Dual-publish workflow.
+# Publish workflow for aiomtec2mqtt.
 #
 # When a GitHub Release is published (or release-on-tag.yml dispatches the
 # `release-on-tag-succeeded` event), this workflow builds, signs, and uploads
-# BOTH distributions in lockstep:
-#   - aiomtec2mqtt              (source: ./)
-#   - aiomtec2mqtt-test-support (source: ./test_support)
+# the aiomtec2mqtt distribution:
+#   - build job (wheel + sdist + CycloneDX SBOM, attached to the Release)
+#   - Trusted-Publishing upload to PyPI (no API tokens)
+#   - Sigstore keyless signing job (bundles attached to the Release)
 #
-# Each package gets:
-#   - a build job (wheel + sdist + CycloneDX SBOM, attached to the Release)
-#   - a Trusted-Publishing upload to PyPI (no API tokens)
-#   - a Sigstore keyless signing job (bundles attached to the Release)
+# The companion package `aiomtec2mqtt-test-support` is NOT published from this
+# workflow. If/when it needs publishing, add a separate workflow rather than
+# coupling it to the main package's release lockstep.
 #
 # Prereqs:
-# - Trusted Publishing is configured on PyPI for *both* projects, pointing at
+# - Trusted Publishing is configured on PyPI for `aiomtec2mqtt`, pointing at
 #   this workflow file (.github/workflows/python-publish.yml) and the
 #   environment named `pypi`.
-# - Versions are kept in lockstep by Release-Please (see release-please-config.json).
 
 name: Upload Python Package to PyPI
 
@@ -36,25 +35,13 @@ concurrency:
 
 jobs:
   # ==========================================================
-  # 1) BUILD JOB (matrix: one entry per distribution)
-  #    - Builds wheel + sdist for the matrix package.
+  # 1) BUILD JOB
+  #    - Builds wheel + sdist for aiomtec2mqtt.
   #    - Generates a CycloneDX SBOM and attaches it to the Release.
   # ==========================================================
   release-build:
     if: github.repository_owner == 'SukramJ'
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - package: aiomtec2mqtt
-            source_dir: .
-            artifact: release-dists-aiomtec2mqtt
-            sbom_artifact: release-sbom-aiomtec2mqtt
-          - package: aiomtec2mqtt-test-support
-            source_dir: test_support
-            artifact: release-dists-aiomtec2mqtt-test-support
-            sbom_artifact: release-sbom-aiomtec2mqtt-test-support
     env:
       TAG_NAME: ${{ github.event.release.tag_name || github.event.client_payload.tag }}
     steps:
@@ -71,8 +58,7 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install build setuptools wheel cyclonedx-bom
 
-      - name: Build distributions (wheel + sdist) for ${{ matrix.package }}
-        working-directory: ${{ matrix.source_dir }}
+      - name: Build distributions (wheel + sdist)
         run: |
           python -m build
           ls -lh dist/
@@ -80,49 +66,46 @@ jobs:
       - name: Upload built distributions
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.artifact }}
-          path: ${{ matrix.source_dir }}/dist/
+          name: release-dists-aiomtec2mqtt
+          path: dist/
           retention-days: 7
 
       - name: Build isolated environment with the wheel for SBOM
-        working-directory: ${{ matrix.source_dir }}
         run: |
           python -m venv /tmp/sbom-venv
           /tmp/sbom-venv/bin/pip install --upgrade pip
           /tmp/sbom-venv/bin/pip install dist/*.whl
 
       - name: Generate CycloneDX SBOM (JSON + XML)
-        working-directory: ${{ matrix.source_dir }}
         run: |
           set -euo pipefail
           mkdir -p sbom
           VERSION="${TAG_NAME#v}"
           cyclonedx-py environment \
             --pyproject pyproject.toml \
-            --schema-version 1.5 \
+            --sv 1.5 \
             --output-format JSON \
-            --outfile "sbom/${{ matrix.package }}-${VERSION}.cdx.json" \
+            --output-file "sbom/aiomtec2mqtt-${VERSION}.cdx.json" \
             /tmp/sbom-venv
           cyclonedx-py environment \
             --pyproject pyproject.toml \
-            --schema-version 1.5 \
+            --sv 1.5 \
             --output-format XML \
-            --outfile "sbom/${{ matrix.package }}-${VERSION}.cdx.xml" \
+            --output-file "sbom/aiomtec2mqtt-${VERSION}.cdx.xml" \
             /tmp/sbom-venv
           ls -lh sbom/
 
       - name: Upload SBOM as artifact
         uses: actions/upload-artifact@v7
         with:
-          name: ${{ matrix.sbom_artifact }}
-          path: ${{ matrix.source_dir }}/sbom/
+          name: release-sbom-aiomtec2mqtt
+          path: sbom/
           retention-days: 90
 
       - name: Attach SBOM to GitHub Release
         if: env.TAG_NAME != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        working-directory: ${{ matrix.source_dir }}
         run: |
           set -euo pipefail
           gh release upload "${TAG_NAME}" \
@@ -131,7 +114,7 @@ jobs:
             --repo "${GITHUB_REPOSITORY}" --clobber
 
   # ==========================================================
-  # 2) PYPI PUBLISH JOB (matrix: one upload per distribution)
+  # 2) PYPI PUBLISH JOB
   # ==========================================================
   pypi-publish:
     if: github.repository_owner == 'SukramJ'
@@ -140,24 +123,14 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - package: aiomtec2mqtt
-            artifact: release-dists-aiomtec2mqtt
-            url: https://pypi.org/p/aiomtec2mqtt
-          - package: aiomtec2mqtt-test-support
-            artifact: release-dists-aiomtec2mqtt-test-support
-            url: https://pypi.org/p/aiomtec2mqtt-test-support
     environment:
       name: pypi
-      url: ${{ matrix.url }}
+      url: https://pypi.org/p/aiomtec2mqtt
     steps:
-      - name: Download built distributions for ${{ matrix.package }}
+      - name: Download built distributions
         uses: actions/download-artifact@v8
         with:
-          name: ${{ matrix.artifact }}
+          name: release-dists-aiomtec2mqtt
           path: dist/
 
       - name: List files to be published
@@ -173,7 +146,7 @@ jobs:
           print-hash: true
 
   # ==========================================================
-  # 3) SIGSTORE SIGNING JOB (matrix: bundles per distribution)
+  # 3) SIGSTORE SIGNING JOB
   # ==========================================================
   sigstore-sign:
     if: github.repository_owner == 'SukramJ'
@@ -182,21 +155,13 @@ jobs:
     permissions:
       id-token: write # required for keyless OIDC signing
       contents: write # required to upload bundles to the Release
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - package: aiomtec2mqtt
-            artifact: release-dists-aiomtec2mqtt
-          - package: aiomtec2mqtt-test-support
-            artifact: release-dists-aiomtec2mqtt-test-support
     env:
       TAG_NAME: ${{ github.event.release.tag_name || github.event.client_payload.tag }}
     steps:
-      - name: Download built distributions for ${{ matrix.package }}
+      - name: Download built distributions
         uses: actions/download-artifact@v8
         with:
-          name: ${{ matrix.artifact }}
+          name: release-dists-aiomtec2mqtt
           path: dist/
 
       - name: Sign distributions with Sigstore
