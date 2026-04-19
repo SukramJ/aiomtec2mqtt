@@ -115,7 +115,7 @@ jobs:
 
       - name: Create GitHub Release
         if: steps.existing.outputs.skip != 'true'
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ env.TAG_NAME }}
           name: "aiomtec2mqtt ${{ env.VERSION }}"
