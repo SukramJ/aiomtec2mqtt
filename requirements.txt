@@ -8,9 +8,9 @@ paho-mqtt==2.1.0
     # via aiomqtt
 prometheus-client==0.25.0
     # via aiomtec2mqtt (pyproject.toml)
-pydantic==2.13.2
+pydantic==2.13.3
     # via aiomtec2mqtt (pyproject.toml)
-pydantic-core==2.46.2
+pydantic-core==2.46.3
     # via pydantic
 pymodbus==3.13.0
     # via aiomtec2mqtt (pyproject.toml)
