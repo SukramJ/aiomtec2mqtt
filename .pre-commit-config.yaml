@@ -10,7 +10,7 @@ repos:
         types_or: [python]
         files: ^(aiomtec2mqtt|tests)/.+\.py$
   - repo: https://github.com/charliermarsh/ruff-pre-commit
-    rev: v0.15.11
+    rev: v0.15.13
     hooks:
       - id: ruff
         args:
