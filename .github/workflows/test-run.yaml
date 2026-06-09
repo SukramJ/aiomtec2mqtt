@@ -32,7 +32,7 @@ jobs:
       - name: Run tests and collect coverage
         run: pytest --cov=aiomtec2mqtt --cov-report=xml tests --asyncio-mode=auto
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v6
+        uses: codecov/codecov-action@v7
         with:
           fail_ci_if_error: ${{ !matrix.experimental }}
           files: ./coverage.xml
