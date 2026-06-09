@@ -10,7 +10,7 @@ prometheus-client==0.25.0
     # via aiomtec2mqtt (pyproject.toml)
 pydantic==2.13.4
     # via aiomtec2mqtt (pyproject.toml)
-pydantic-core==2.46.4
+pydantic-core==2.47.0
     # via pydantic
 pymodbus==3.13.0
     # via aiomtec2mqtt (pyproject.toml)
